@@ -22,9 +22,14 @@ const (
 	promptNone promptKind = iota
 	promptCommit
 	promptNewBranch
+	promptConfirmDiscard
 )
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.focusedListIsFiltering() {
+		return m.updateFocusedList(msg)
+	}
+
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -65,7 +70,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		if m.focus == focusFiles {
 			if item, ok := m.files.SelectedItem().(fileItem); ok {
-				return m, resetCmd(m.runner, item.change.Path)
+				m.prompt = promptConfirmDiscard
+				m.pendingDiscardPath = item.change.Path
 			}
 		}
 		return m, nil
@@ -87,6 +93,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.updateFocusedList(msg)
 }
 
+// focusedListIsFiltering reports whether the list currently in focus is
+// actively accepting filter input (i.e. the user pressed "/" and is typing
+// a filter query). While true, the single-letter global shortcuts in
+// handleKey must not fire - every keystroke belongs to the filter box.
+// The diff panel has no filtering, so it's not part of this check.
+func (m Model) focusedListIsFiltering() bool {
+	switch m.focus {
+	case focusFiles:
+		return m.files.SettingFilter()
+	case focusBranches:
+		return m.branches.SettingFilter()
+	case focusHistory:
+		return m.history.SettingFilter()
+	}
+	return false
+}
+
 func (m Model) updateFocusedList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.focus {
@@ -96,11 +119,23 @@ func (m Model) updateFocusedList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.branches, cmd = m.branches.Update(msg)
 	case focusHistory:
 		m.history, cmd = m.history.Update(msg)
+	case focusDiff:
+		m.diff.vp, cmd = m.diff.vp.Update(msg)
 	}
 	return m, cmd
 }
 
 func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.prompt == promptConfirmDiscard {
+		m.prompt = promptNone
+		path := m.pendingDiscardPath
+		m.pendingDiscardPath = ""
+		if msg.String() == "y" {
+			return m, resetCmd(m.runner, path)
+		}
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "esc":
 		m.prompt = promptNone

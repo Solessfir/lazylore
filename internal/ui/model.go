@@ -48,13 +48,19 @@ func refreshCmd(r lore.Runner) tea.Cmd {
 	return tea.Batch(loadStatusCmd(r), loadBranchesCmd(r), loadHistoryCmd(r))
 }
 
+// footerHeight is the number of terminal rows reserved for the footer (the
+// command log / prompt / error line). It's used both by resize(), to leave
+// room for the footer above the panels, and by View(), to cap how many
+// command-log entries are actually rendered so the footer can't grow past
+// its reserved space and push the panel layout around.
+const footerHeight = 3
+
 // resize propagates the terminal size to every sub-widget: three stacked
 // lists on the left (Files/Branches/History), the diff viewport on the
 // right, and a 3-line footer for the command log / prompt / error line.
 // Each panel is drawn with a lipgloss rounded border, so 2 is subtracted
 // from both dimensions to leave room for it.
 func (m *Model) resize() {
-	const footerHeight = 3
 	const borderWidth = 2
 	const borderHeight = 2
 

@@ -28,11 +28,14 @@ func (m Model) View() string {
 	right := panelStyle(m.focus == focusDiff).Render("Diff\n" + m.diff.vp.View())
 	main := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	footer := m.log.View()
-	if m.prompt != promptNone {
+	var footer string
+	switch {
+	case m.prompt != promptNone:
 		footer = m.input.View()
-	} else if m.err != nil {
-		footer = errorStyle.Render(m.err.Error()) + "\n" + footer
+	case m.err != nil:
+		footer = errorStyle.Render(m.err.Error()) + "\n" + m.log.LastLines(footerHeight-1)
+	default:
+		footer = m.log.LastLines(footerHeight)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, main, footer)
