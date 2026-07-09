@@ -30,6 +30,8 @@ func (m Model) View() string {
 
 	var footer string
 	switch {
+	case m.prompt == promptConfirmDiscard:
+		footer = "Discard changes to " + m.pendingDiscardPath + "? (y/N)"
 	case m.prompt != promptNone:
 		footer = m.input.View()
 	case m.err != nil:

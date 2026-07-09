@@ -65,6 +65,18 @@ func Reset(r Runner, paths ...string) (Result, error) {
 	return runChecked(r, append([]string{"reset"}, paths...)...)
 }
 
+// DiscardChanges fully discards a single file's changes, whether staged,
+// unstaged, or both. `lore reset <path>` alone fails with "invalid
+// arguments: Failed to reset staged node" if the file has staged content, so
+// this always unstages first - a safe no-op when nothing was staged - then
+// resets, which is then guaranteed to succeed since nothing remains staged.
+func DiscardChanges(r Runner, path string) (Result, error) {
+	if _, err := runChecked(r, "unstage", path); err != nil {
+		return Result{}, err
+	}
+	return runChecked(r, "reset", path)
+}
+
 func Commit(r Runner, message string) (Result, error) {
 	return runChecked(r, "commit", message)
 }

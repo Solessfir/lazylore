@@ -111,3 +111,37 @@ func TestCreateBranch_BuildsArgs(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestDiscardChanges_UnstagesThenResetsInOrder(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"unstage a.txt": {ExitCode: 0},
+		"reset a.txt":   {ExitCode: 0},
+	}}
+	_, err := lore.DiscardChanges(fake, "a.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fake.Calls) != 2 {
+		t.Fatalf("Calls = %+v, want 2 calls", fake.Calls)
+	}
+	if fake.Calls[0][0] != "unstage" {
+		t.Fatalf("Calls[0] = %+v, want unstage first", fake.Calls[0])
+	}
+	if fake.Calls[1][0] != "reset" {
+		t.Fatalf("Calls[1] = %+v, want reset second", fake.Calls[1])
+	}
+}
+
+func TestDiscardChanges_ShortCircuitsWhenUnstageFails(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"unstage a.txt": {ExitCode: 1, Stderr: "boom"},
+		"reset a.txt":   {ExitCode: 0},
+	}}
+	_, err := lore.DiscardChanges(fake, "a.txt")
+	if err == nil {
+		t.Fatal("expected an error when unstage fails")
+	}
+	if len(fake.Calls) != 1 || fake.Calls[0][0] != "unstage" {
+		t.Fatalf("Calls = %+v, want only the unstage call (reset must not run)", fake.Calls)
+	}
+}

@@ -50,7 +50,7 @@ func unstageCmd(r lore.Runner, path string) tea.Cmd {
 
 func resetCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := lore.Reset(r, path)
+		_, err := lore.DiscardChanges(r, path)
 		return actionDoneMsg{label: "reset " + path, err: err}
 	}
 }

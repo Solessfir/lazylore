@@ -18,9 +18,10 @@ type Model struct {
 	diff     diffModel
 	log      commandLogModel
 
-	focus  focusPanel
-	prompt promptKind
-	input  textinput.Model
+	focus              focusPanel
+	prompt             promptKind
+	input              textinput.Model
+	pendingDiscardPath string
 
 	status lore.Status
 	err    error
