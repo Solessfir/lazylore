@@ -29,24 +29,34 @@ type Model struct {
 	err    error
 
 	width, height int
+	leftWidth     int // left column's outer width, incl. border; View reuses it for the Status panel
 }
 
-// selectedItemColor marks the cursor row in every list. Set explicitly
-// (rather than relying on the default delegate's built-in colors) so the
-// selected row stays unmistakable across terminal color profiles.
-var selectedItemColor = lipgloss.Color("212")
+// Colors match lazygit's actual default theme (pkg/config/user_config.go):
+// ActiveBorderColor "green bold", SelectedLineBgColor "blue" (a background
+// fill, not just a foreground change - that's what makes lazygit's
+// selected row unmistakable regardless of terminal color profile).
+// Basic 16-color ANSI codes only (0-15), since those are the one palette
+// every terminal renders correctly - no 256-color/TrueColor detection to
+// get wrong.
+var (
+	selectedBg = lipgloss.Color("4")  // blue, matches lazygit's SelectedLineBgColor
+	selectedFg = lipgloss.Color("15") // bright white, for contrast against the blue fill
+)
 
-// newListDelegate returns a list.ItemDelegate with a strong, explicit
-// selected-row style, shared by the Files/Branches/History lists.
+// newListDelegate returns a list.ItemDelegate whose selected row gets a
+// solid background fill (like lazygit) on top of the default delegate's
+// own left-border marker, not just a foreground color tweak - shared by
+// the Files/Branches/History lists.
 func newListDelegate() list.ItemDelegate {
 	d := list.NewDefaultDelegate()
 	d.Styles.SelectedTitle = d.Styles.SelectedTitle.
-		Foreground(selectedItemColor).
-		BorderForeground(selectedItemColor).
+		Background(selectedBg).
+		Foreground(selectedFg).
 		Bold(true)
 	d.Styles.SelectedDesc = d.Styles.SelectedDesc.
-		Foreground(selectedItemColor).
-		BorderForeground(selectedItemColor)
+		Background(selectedBg).
+		Foreground(selectedFg)
 	return d
 }
 
@@ -100,18 +110,22 @@ const keybindBarHeight = 1
 // repo name and current branch: one content line plus its border.
 const statusPanelHeight = 3
 
+// borderWidth/borderHeight are the space every bordered panel's lipgloss
+// rounded border consumes. resize() uses them to size each panel's inner
+// content; View() reuses borderWidth to size the Status panel, which has
+// no bubbles widget of its own to size it automatically.
+const (
+	borderWidth  = 2
+	borderHeight = 2
+)
+
 // resize propagates the terminal size to every sub-widget: a Status panel
 // plus three stacked lists on the left (Files/Branches/History), the diff
 // viewport on the right, the command log / prompt / error footer, and the
-// global keybinding bar. Each bordered panel is drawn with a lipgloss
-// rounded border, so 2 is subtracted from both dimensions to leave room
-// for it.
+// global keybinding bar.
 func (m *Model) resize() {
-	const borderWidth = 2
-	const borderHeight = 2
-
-	leftWidth := m.width / 3
-	rightWidth := m.width - leftWidth
+	m.leftWidth = m.width / 3
+	rightWidth := m.width - m.leftWidth
 	bodyHeight := m.height - footerHeight - keybindBarHeight
 	if bodyHeight < 0 {
 		bodyHeight = 0
@@ -122,7 +136,7 @@ func (m *Model) resize() {
 	}
 	panelHeight := listAreaHeight / 3
 
-	listWidth := max(0, leftWidth-borderWidth)
+	listWidth := max(0, m.leftWidth-borderWidth)
 	listHeight := max(0, panelHeight-borderHeight)
 	m.files.SetSize(listWidth, listHeight)
 	m.branches.SetSize(listWidth, listHeight)

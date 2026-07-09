@@ -2,11 +2,17 @@ package ui
 
 import "github.com/charmbracelet/lipgloss"
 
+// Colors match lazygit's actual default theme (pkg/config/user_config.go):
+// ActiveBorderColor "green bold", InactiveBorderColor "default",
+// OptionsTextColor "blue", UnstagedChangesColor "red" (reused here for
+// errors). Basic 16-color ANSI codes only (0-15) - the one palette every
+// terminal renders correctly, unlike 256-color/TrueColor codes which
+// depend on terminal capability detection going right.
 var (
-	focusedPanelStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("6"))
+	focusedPanelStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("2")).Bold(true)
 	unfocusedPanelStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8"))
 	errorStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-	keybindBarStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+	keybindBarStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
 )
 
 // keybindBarText is the global keybinding legend pinned to the very
@@ -30,7 +36,12 @@ func (m Model) View() string {
 	if m.status.Branch != "" {
 		statusText += " → " + m.status.Branch
 	}
-	statusPanel := unfocusedPanelStyle.Render("Status\n" + statusText)
+	// Unlike the list/viewport-backed panels below it, Status has no
+	// bubbles widget sizing its content - without an explicit width here
+	// its border shrinks to fit the text instead of matching the left
+	// column, breaking the whole left-side alignment.
+	statusWidth := max(0, m.leftWidth-borderWidth)
+	statusPanel := unfocusedPanelStyle.Width(statusWidth).Render("Status\n" + statusText)
 
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		statusPanel,
