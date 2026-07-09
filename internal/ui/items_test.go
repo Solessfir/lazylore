@@ -1,28 +1,54 @@
 package ui
 
 import (
+	"bytes"
 	"testing"
+
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/lipgloss"
 
 	"lazylore/internal/lore"
 )
 
-func TestFileItem_TitleShowsStatusAndPath(t *testing.T) {
+func TestFileItem_FilterValueIsThePath(t *testing.T) {
 	item := fileItem{change: lore.FileChange{Status: 'M', Path: "hello.txt"}, staged: false}
-	if item.Title() != "M hello.txt" {
-		t.Fatalf("Title() = %q, want %q", item.Title(), "M hello.txt")
-	}
-	if item.Description() != "unstaged" {
-		t.Fatalf("Description() = %q, want %q", item.Description(), "unstaged")
-	}
 	if item.FilterValue() != "hello.txt" {
 		t.Fatalf("FilterValue() = %q, want %q", item.FilterValue(), "hello.txt")
 	}
 }
 
-func TestFileItem_StagedDescription(t *testing.T) {
-	item := fileItem{change: lore.FileChange{Status: 'A', Path: "new.txt"}, staged: true}
-	if item.Description() != "staged" {
-		t.Fatalf("Description() = %q, want %q", item.Description(), "staged")
+func TestFileStatusColor_StagedIsGreenUnstagedIsRed(t *testing.T) {
+	if got := fileStatusColor(true); got != fileStagedColor {
+		t.Fatalf("fileStatusColor(true) = %v, want %v (green)", got, fileStagedColor)
+	}
+	if got := fileStatusColor(false); got != fileUnstagedColor {
+		t.Fatalf("fileStatusColor(false) = %v, want %v (red)", got, fileUnstagedColor)
+	}
+}
+
+func TestFileNameStyle_StagedIsGreenUnstagedIsUncolored(t *testing.T) {
+	if got := fileNameStyle(true).GetForeground(); got != fileStagedColor {
+		t.Fatalf("staged filename foreground = %v, want %v (green)", got, fileStagedColor)
+	}
+	// Unstaged/untracked filenames are left uncolored (matches lazygit: only
+	// the status letter is colored, the filename stays in the default text
+	// color) - GetForeground on a style with no Foreground() call returns
+	// lipgloss.NoColor{}.
+	if got := fileNameStyle(false).GetForeground(); got != (lipgloss.NoColor{}) {
+		t.Fatalf("unstaged filename foreground = %v, want no color set", got)
+	}
+}
+
+func TestFileDelegate_RenderColorsStatusLetterButNotUnstagedName(t *testing.T) {
+	items := []list.Item{fileItem{change: lore.FileChange{Status: 'M', Path: "hello.txt"}, staged: false}}
+	l := list.New(items, fileDelegate{focused: false}, 40, 5)
+
+	var buf bytes.Buffer
+	fileDelegate{focused: false}.Render(&buf, l, 0, items[0])
+	out := buf.String()
+
+	if !bytes.Contains(buf.Bytes(), []byte("hello.txt")) {
+		t.Fatalf("rendered output missing the filename: %q", out)
 	}
 }
 

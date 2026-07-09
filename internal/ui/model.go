@@ -80,14 +80,14 @@ func newListDelegate(focused bool) list.ItemDelegate {
 	return d
 }
 
-// newPanelList builds a list.Model with its own built-in title/status-bar/
-// help/pagination chrome turned off - the panel border (drawn in View)
-// already carries the title, keybindings live in the single global bar at
-// the bottom of the screen instead of being repeated per panel, and with
-// only ever one page of items visible at these panel sizes the pagination
-// dots just take up a row for nothing.
-func newPanelList(focused bool) list.Model {
-	l := list.New(nil, newListDelegate(focused), 0, 0)
+// newPanelList builds a list.Model with the given delegate and its own
+// built-in title/status-bar/help/pagination chrome turned off - the panel
+// border (drawn in View) already carries the title, keybindings live in
+// the single global bar at the bottom of the screen instead of being
+// repeated per panel, and with only ever one page of items visible at
+// these panel sizes the pagination dots just take up a row for nothing.
+func newPanelList(delegate list.ItemDelegate) list.Model {
+	l := list.New(nil, delegate, 0, 0)
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
@@ -100,7 +100,7 @@ func newPanelList(focused bool) list.Model {
 // changes. list.Model has no "am I focused" concept of its own - that's
 // this app's, so the delegate has to be pushed in from outside.
 func (m *Model) syncFocusDelegates() {
-	m.files.SetDelegate(newListDelegate(m.focus == focusFiles))
+	m.files.SetDelegate(fileDelegate{focused: m.focus == focusFiles})
 	m.branches.SetDelegate(newListDelegate(m.focus == focusBranches))
 	m.history.SetDelegate(newListDelegate(m.focus == focusHistory))
 }
@@ -109,9 +109,10 @@ func NewModel(r lore.Runner, repoName string) Model {
 	return Model{
 		runner:   r,
 		repoName: repoName,
-		files:    newPanelList(true), // focusFiles is the initial focus, below
-		branches: newPanelList(false),
-		history:  newPanelList(false),
+		// focusFiles is the initial focus, below.
+		files:    newPanelList(fileDelegate{focused: true}),
+		branches: newPanelList(newListDelegate(false)),
+		history:  newPanelList(newListDelegate(false)),
 		diff:     newDiffModel(0, 0),
 		log:      newCommandLogModel(20),
 		focus:    focusFiles,

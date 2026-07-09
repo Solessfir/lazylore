@@ -30,7 +30,7 @@ func TestNewListDelegate_UnfocusedHasNoBackgroundFill(t *testing.T) {
 }
 
 func TestNewPanelList_PaginationHidden(t *testing.T) {
-	l := newPanelList(true)
+	l := newPanelList(newListDelegate(true))
 	if l.ShowPagination() {
 		t.Fatal("panel lists should not show pagination dots - panels are too small to page through, and it wastes a row")
 	}
