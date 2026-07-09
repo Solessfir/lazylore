@@ -46,7 +46,7 @@ func run() error {
 	}
 
 	runner := lore.ExecRunner{BinaryPath: binPath, RepoPath: repoRoot}
-	model := ui.NewModel(runner)
+	model := ui.NewModel(runner, filepath.Base(repoRoot))
 
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	_, err = program.Run()

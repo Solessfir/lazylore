@@ -4,13 +4,15 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"lazylore/internal/lore"
 )
 
 // Model is lazylore's root Bubble Tea model.
 type Model struct {
-	runner lore.Runner
+	runner   lore.Runner
+	repoName string
 
 	files    list.Model
 	branches list.Model
@@ -29,12 +31,45 @@ type Model struct {
 	width, height int
 }
 
-func NewModel(r lore.Runner) Model {
+// selectedItemColor marks the cursor row in every list. Set explicitly
+// (rather than relying on the default delegate's built-in colors) so the
+// selected row stays unmistakable across terminal color profiles.
+var selectedItemColor = lipgloss.Color("212")
+
+// newListDelegate returns a list.ItemDelegate with a strong, explicit
+// selected-row style, shared by the Files/Branches/History lists.
+func newListDelegate() list.ItemDelegate {
+	d := list.NewDefaultDelegate()
+	d.Styles.SelectedTitle = d.Styles.SelectedTitle.
+		Foreground(selectedItemColor).
+		BorderForeground(selectedItemColor).
+		Bold(true)
+	d.Styles.SelectedDesc = d.Styles.SelectedDesc.
+		Foreground(selectedItemColor).
+		BorderForeground(selectedItemColor)
+	return d
+}
+
+// newPanelList builds a list.Model with this app's shared delegate and its
+// own built-in title/status-bar/help chrome turned off - the panel border
+// (drawn in View) already carries the title, and keybindings live in the
+// single global bar at the bottom of the screen instead of being repeated
+// per panel.
+func newPanelList() list.Model {
+	l := list.New(nil, newListDelegate(), 0, 0)
+	l.SetShowTitle(false)
+	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
+	return l
+}
+
+func NewModel(r lore.Runner, repoName string) Model {
 	return Model{
 		runner:   r,
-		files:    list.New(nil, list.NewDefaultDelegate(), 0, 0),
-		branches: list.New(nil, list.NewDefaultDelegate(), 0, 0),
-		history:  list.New(nil, list.NewDefaultDelegate(), 0, 0),
+		repoName: repoName,
+		files:    newPanelList(),
+		branches: newPanelList(),
+		history:  newPanelList(),
 		diff:     newDiffModel(0, 0),
 		log:      newCommandLogModel(20),
 		focus:    focusFiles,
@@ -49,29 +84,43 @@ func refreshCmd(r lore.Runner) tea.Cmd {
 	return tea.Batch(loadStatusCmd(r), loadBranchesCmd(r), loadHistoryCmd(r))
 }
 
-// footerHeight is the number of terminal rows reserved for the footer (the
-// command log / prompt / error line). It's used both by resize(), to leave
-// room for the footer above the panels, and by View(), to cap how many
-// command-log entries are actually rendered so the footer can't grow past
-// its reserved space and push the panel layout around.
+// footerHeight is the number of terminal rows reserved for the command
+// log / prompt / error line, directly above the global keybinding bar.
+// It's used both by resize(), to leave room for that area above the
+// panels, and by View(), to cap how many command-log entries are actually
+// rendered so the footer can't grow past its reserved space and push the
+// panel layout around.
 const footerHeight = 3
 
-// resize propagates the terminal size to every sub-widget: three stacked
-// lists on the left (Files/Branches/History), the diff viewport on the
-// right, and a 3-line footer for the command log / prompt / error line.
-// Each panel is drawn with a lipgloss rounded border, so 2 is subtracted
-// from both dimensions to leave room for it.
+// keybindBarHeight is the single always-visible row at the very bottom of
+// the screen showing the global keybinding legend.
+const keybindBarHeight = 1
+
+// statusPanelHeight is the small bordered panel above Files showing the
+// repo name and current branch: one content line plus its border.
+const statusPanelHeight = 3
+
+// resize propagates the terminal size to every sub-widget: a Status panel
+// plus three stacked lists on the left (Files/Branches/History), the diff
+// viewport on the right, the command log / prompt / error footer, and the
+// global keybinding bar. Each bordered panel is drawn with a lipgloss
+// rounded border, so 2 is subtracted from both dimensions to leave room
+// for it.
 func (m *Model) resize() {
 	const borderWidth = 2
 	const borderHeight = 2
 
 	leftWidth := m.width / 3
 	rightWidth := m.width - leftWidth
-	bodyHeight := m.height - footerHeight
+	bodyHeight := m.height - footerHeight - keybindBarHeight
 	if bodyHeight < 0 {
 		bodyHeight = 0
 	}
-	panelHeight := bodyHeight / 3
+	listAreaHeight := bodyHeight - statusPanelHeight
+	if listAreaHeight < 0 {
+		listAreaHeight = 0
+	}
+	panelHeight := listAreaHeight / 3
 
 	listWidth := max(0, leftWidth-borderWidth)
 	listHeight := max(0, panelHeight-borderHeight)

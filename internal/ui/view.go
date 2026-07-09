@@ -6,7 +6,13 @@ var (
 	focusedPanelStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("6"))
 	unfocusedPanelStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8"))
 	errorStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	keybindBarStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
 )
+
+// keybindBarText is the global keybinding legend pinned to the very
+// bottom of the screen. Kept to keys handleKey/handlePromptKey actually
+// implement - no promising a "?" help overlay or similar that doesn't exist.
+const keybindBarText = "Panel: tab/h/l  Stage: space  Commit: c  Branch: n  Diff/Switch: enter  Discard: d  Quit: q"
 
 func panelStyle(focused bool) lipgloss.Style {
 	if focused {
@@ -20,7 +26,14 @@ func (m Model) View() string {
 		return "loading..."
 	}
 
+	statusText := m.repoName
+	if m.status.Branch != "" {
+		statusText += " → " + m.status.Branch
+	}
+	statusPanel := unfocusedPanelStyle.Render("Status\n" + statusText)
+
 	left := lipgloss.JoinVertical(lipgloss.Left,
+		statusPanel,
 		panelStyle(m.focus == focusFiles).Render("Files\n"+m.files.View()),
 		panelStyle(m.focus == focusBranches).Render("Branches\n"+m.branches.View()),
 		panelStyle(m.focus == focusHistory).Render("History\n"+m.history.View()),
@@ -40,5 +53,5 @@ func (m Model) View() string {
 		footer = m.log.LastLines(footerHeight)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, main, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, main, footer, keybindBarStyle.Render(keybindBarText))
 }

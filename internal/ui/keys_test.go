@@ -9,7 +9,7 @@ import (
 )
 
 func TestUpdateFocusedList_RoutesKeysToDiffViewport(t *testing.T) {
-	m := NewModel(&lore.FakeRunner{})
+	m := NewModel(&lore.FakeRunner{}, "test-repo")
 	m.focus = focusDiff
 	m.diff.vp.Width = 10
 	m.diff.vp.Height = 2
@@ -30,7 +30,7 @@ func TestHandleKey_FilterModeBypassesGlobalShortcuts(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"reset a.txt": {ExitCode: 0},
 	}}
-	m := NewModel(fake)
+	m := NewModel(fake, "test-repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 
@@ -63,7 +63,7 @@ func TestModel_DKeyOnFileOpensDiscardConfirmPrompt(t *testing.T) {
 		"unstage a.txt": {ExitCode: 0},
 		"reset a.txt":   {ExitCode: 0},
 	}}
-	m := NewModel(fake)
+	m := NewModel(fake, "test-repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 
@@ -88,7 +88,7 @@ func TestModel_YKeyConfirmsDiscardAndUnstagesThenResets(t *testing.T) {
 		"unstage a.txt": {ExitCode: 0},
 		"reset a.txt":   {ExitCode: 0},
 	}}
-	m := NewModel(fake)
+	m := NewModel(fake, "test-repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
@@ -123,7 +123,7 @@ func TestModel_EscCancelsDiscardPromptWithoutRunnerCalls(t *testing.T) {
 		"unstage a.txt": {ExitCode: 0},
 		"reset a.txt":   {ExitCode: 0},
 	}}
-	m := NewModel(fake)
+	m := NewModel(fake, "test-repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})

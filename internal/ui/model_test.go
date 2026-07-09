@@ -9,7 +9,7 @@ import (
 )
 
 func TestModel_StatusMsgPopulatesFilesList(t *testing.T) {
-	m := NewModel(&lore.FakeRunner{})
+	m := NewModel(&lore.FakeRunner{}, "test-repo")
 	s := lore.Status{
 		Repository: "abc",
 		Staged:     []lore.FileChange{{Status: 'A', Path: "a.txt"}},
@@ -22,7 +22,7 @@ func TestModel_StatusMsgPopulatesFilesList(t *testing.T) {
 }
 
 func TestModel_TabCyclesFocusForward(t *testing.T) {
-	m := NewModel(&lore.FakeRunner{})
+	m := NewModel(&lore.FakeRunner{}, "test-repo")
 	if m.focus != focusFiles {
 		t.Fatalf("initial focus = %v, want focusFiles", m.focus)
 	}
@@ -38,7 +38,7 @@ func TestModel_SpaceOnUnstagedFileDispatchesStageCmd(t *testing.T) {
 		"stage a.txt":   {ExitCode: 0},
 		"status --scan": {ExitCode: 0, Stdout: "Repository x\nOn branch main revision 0 -> 0\n"},
 	}}
-	m := NewModel(fake)
+	m := NewModel(fake, "test-repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 
@@ -63,7 +63,7 @@ func TestModel_EnterOnFileDispatchesLoadDiffCmd(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"diff a.txt": {ExitCode: 0, Stdout: "+++ a.txt\n"},
 	}}
-	m := NewModel(fake)
+	m := NewModel(fake, "test-repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 
@@ -85,7 +85,7 @@ func TestModel_CommitPromptSubmitsMessage(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"commit hi": {ExitCode: 0},
 	}}
-	m := NewModel(fake)
+	m := NewModel(fake, "test-repo")
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
 	m2 := updated.(Model)
@@ -119,7 +119,7 @@ func TestModel_ActionDoneMsgAppendsToCommandLogAndRefreshes(t *testing.T) {
 		"branch list":          {ExitCode: 0, Stdout: "Local branches:\n* main\nRemote branches:\n"},
 		"history --oneline 50": {ExitCode: 0, Stdout: ""},
 	}}
-	m := NewModel(fake)
+	m := NewModel(fake, "test-repo")
 	updated, cmd := m.Update(actionDoneMsg{label: "stage a.txt"})
 	m2 := updated.(Model)
 	if len(m2.log.entries) != 1 || m2.log.entries[0] != "stage a.txt: OK" {
