@@ -123,24 +123,31 @@ const (
 // plus three stacked lists on the left (Files/Branches/History), the diff
 // viewport on the right, the command log / prompt / error footer, and the
 // global keybinding bar.
+//
+// Sizes are computed with distributeSpace (see boxlayout.go) rather than
+// plain division, so the panels always sum to exactly the space available
+// - matching lazygit's own approach (side panels at weight 1 apiece below
+// a fixed-height status box) instead of silently losing a row or two to
+// integer-division truncation, which left this layout visibly misaligned.
 func (m *Model) resize() {
-	m.leftWidth = m.width / 3
-	rightWidth := m.width - m.leftWidth
-	bodyHeight := m.height - footerHeight - keybindBarHeight
-	if bodyHeight < 0 {
-		bodyHeight = 0
-	}
-	listAreaHeight := bodyHeight - statusPanelHeight
-	if listAreaHeight < 0 {
-		listAreaHeight = 0
-	}
-	panelHeight := listAreaHeight / 3
+	widths := distributeSpace([]layoutBox{{Weight: 1}, {Weight: 2}}, m.width)
+	m.leftWidth = widths[0]
+	rightWidth := widths[1]
+
+	bodyHeight := max(0, m.height-footerHeight-keybindBarHeight)
+
+	heights := distributeSpace([]layoutBox{
+		{Size: statusPanelHeight}, // Status
+		{Weight: 1},               // Files
+		{Weight: 1},               // Branches
+		{Weight: 1},               // History
+	}, bodyHeight)
+	panelHeights := heights[1:]
 
 	listWidth := max(0, m.leftWidth-borderWidth)
-	listHeight := max(0, panelHeight-borderHeight)
-	m.files.SetSize(listWidth, listHeight)
-	m.branches.SetSize(listWidth, listHeight)
-	m.history.SetSize(listWidth, listHeight)
+	m.files.SetSize(listWidth, max(0, panelHeights[0]-borderHeight))
+	m.branches.SetSize(listWidth, max(0, panelHeights[1]-borderHeight))
+	m.history.SetSize(listWidth, max(0, panelHeights[2]-borderHeight))
 
 	m.diff.vp.Width = max(0, rightWidth-borderWidth)
 	m.diff.vp.Height = max(0, bodyHeight-borderHeight)
