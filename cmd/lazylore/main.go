@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -30,7 +31,7 @@ func run() error {
 		return err
 	}
 
-	binPath, err := lore.ResolveBinaryPath(cfg.LorePath, exec.LookPath)
+	binPath, err := lore.ResolveBinaryPath(cfg.LorePath, exec.LookPath, fileExists, runtime.GOOS)
 	if err != nil {
 		return err
 	}
@@ -50,4 +51,9 @@ func run() error {
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	_, err = program.Run()
 	return err
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
