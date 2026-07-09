@@ -29,7 +29,20 @@ type Model struct {
 	err    error
 
 	width, height int
-	leftWidth     int // left column's outer width, incl. border; View reuses it for the Status panel
+
+	// Panel content dimensions computed by resize(), reused by View(). Each
+	// *Height is the FULL interior budget for that panel (title row + list
+	// content), not just the list's own row count - list.Model.View() and
+	// viewport.Model.View() don't pad their own output to fill a configured
+	// size when they have little content, they only render actual content
+	// lines, so View() must set an explicit Width/Height on every panel's
+	// border itself (using these fields) or panels with different content
+	// shrink to different sizes instead of lining up.
+	panelWidth     int
+	filesHeight    int
+	branchesHeight int
+	historyHeight  int
+	diffHeight     int
 }
 
 // Colors match lazygit's actual default theme (pkg/config/user_config.go):
@@ -107,8 +120,9 @@ const footerHeight = 3
 const keybindBarHeight = 1
 
 // statusPanelHeight is the small bordered panel above Files showing the
-// repo name and current branch: one content line plus its border.
-const statusPanelHeight = 3
+// repo name and current branch: a "Status" title line, one content line,
+// plus its border.
+const statusPanelHeight = 4
 
 // borderWidth/borderHeight are the space every bordered panel's lipgloss
 // rounded border consumes. resize() uses them to size each panel's inner
@@ -131,7 +145,7 @@ const (
 // integer-division truncation, which left this layout visibly misaligned.
 func (m *Model) resize() {
 	widths := distributeSpace([]layoutBox{{Weight: 1}, {Weight: 2}}, m.width)
-	m.leftWidth = widths[0]
+	leftWidth := widths[0]
 	rightWidth := widths[1]
 
 	bodyHeight := max(0, m.height-footerHeight-keybindBarHeight)
@@ -142,15 +156,25 @@ func (m *Model) resize() {
 		{Weight: 1},               // Branches
 		{Weight: 1},               // History
 	}, bodyHeight)
-	panelHeights := heights[1:]
 
-	listWidth := max(0, m.leftWidth-borderWidth)
-	m.files.SetSize(listWidth, max(0, panelHeights[0]-borderHeight))
-	m.branches.SetSize(listWidth, max(0, panelHeights[1]-borderHeight))
-	m.history.SetSize(listWidth, max(0, panelHeights[2]-borderHeight))
+	// titleRowHeight is the "Files"/"Branches"/"History"/"Diff" title line
+	// each panel renders above its content - part of the panel's interior
+	// budget, not extra space on top of it, so the wrapped widget itself
+	// gets one row less than the panel's full interior height.
+	const titleRowHeight = 1
+
+	m.panelWidth = max(0, leftWidth-borderWidth)
+	m.filesHeight = max(0, heights[1]-borderHeight)
+	m.branchesHeight = max(0, heights[2]-borderHeight)
+	m.historyHeight = max(0, heights[3]-borderHeight)
+	m.diffHeight = max(0, bodyHeight-borderHeight)
+
+	m.files.SetSize(m.panelWidth, max(0, m.filesHeight-titleRowHeight))
+	m.branches.SetSize(m.panelWidth, max(0, m.branchesHeight-titleRowHeight))
+	m.history.SetSize(m.panelWidth, max(0, m.historyHeight-titleRowHeight))
 
 	m.diff.vp.Width = max(0, rightWidth-borderWidth)
-	m.diff.vp.Height = max(0, bodyHeight-borderHeight)
+	m.diff.vp.Height = max(0, m.diffHeight-titleRowHeight)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

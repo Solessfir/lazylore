@@ -27,6 +27,17 @@ func panelStyle(focused bool) lipgloss.Style {
 	return unfocusedPanelStyle
 }
 
+// renderPanel wraps title+content in a bordered box at an explicit
+// width/height. list.Model.View() and viewport.Model.View() (and plain
+// text, for the Status panel) only render their actual content lines -
+// they don't pad to fill a configured size - so without an explicit
+// Width/Height here, a panel with little content (e.g. one branch) shrinks
+// its border to fit that content instead of matching its neighbors, and
+// panels stop lining up with each other.
+func renderPanel(focused bool, width, height int, title, content string) string {
+	return panelStyle(focused).Width(width).Height(height).Render(title + "\n" + content)
+}
+
 func (m Model) View() string {
 	if m.width == 0 {
 		return "loading..."
@@ -36,20 +47,15 @@ func (m Model) View() string {
 	if m.status.Branch != "" {
 		statusText += " → " + m.status.Branch
 	}
-	// Unlike the list/viewport-backed panels below it, Status has no
-	// bubbles widget sizing its content - without an explicit width here
-	// its border shrinks to fit the text instead of matching the left
-	// column, breaking the whole left-side alignment.
-	statusWidth := max(0, m.leftWidth-borderWidth)
-	statusPanel := unfocusedPanelStyle.Width(statusWidth).Render("Status\n" + statusText)
+	statusPanel := renderPanel(false, m.panelWidth, statusPanelHeight-borderHeight, "Status", statusText)
 
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		statusPanel,
-		panelStyle(m.focus == focusFiles).Render("Files\n"+m.files.View()),
-		panelStyle(m.focus == focusBranches).Render("Branches\n"+m.branches.View()),
-		panelStyle(m.focus == focusHistory).Render("History\n"+m.history.View()),
+		renderPanel(m.focus == focusFiles, m.panelWidth, m.filesHeight, "Files", m.files.View()),
+		renderPanel(m.focus == focusBranches, m.panelWidth, m.branchesHeight, "Branches", m.branches.View()),
+		renderPanel(m.focus == focusHistory, m.panelWidth, m.historyHeight, "History", m.history.View()),
 	)
-	right := panelStyle(m.focus == focusDiff).Render("Diff\n" + m.diff.vp.View())
+	right := renderPanel(m.focus == focusDiff, m.diff.vp.Width, m.diffHeight, "Diff", m.diff.vp.View())
 	main := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
 	var footer string
