@@ -57,42 +57,61 @@ var (
 	selectedFg = lipgloss.Color("15") // bright white, for contrast against the blue fill
 )
 
-// newListDelegate returns a list.ItemDelegate whose selected row gets a
-// solid background fill (like lazygit) on top of the default delegate's
-// own left-border marker, not just a foreground color tweak - shared by
-// the Files/Branches/History lists.
-func newListDelegate() list.ItemDelegate {
+// newListDelegate returns a list.ItemDelegate for a list's selected row.
+// Each list keeps its own cursor position regardless of which panel our
+// own app-level focus is on, so without this distinction every list would
+// show a highlighted row at once - only the panel that's actually focused
+// should get the strong background fill; the others get a much subtler
+// style, matching lazygit's own InactiveViewSelectedLineBgColor: "bold"
+// (no background fill at all for unfocused panels).
+func newListDelegate(focused bool) list.ItemDelegate {
 	d := list.NewDefaultDelegate()
-	d.Styles.SelectedTitle = d.Styles.SelectedTitle.
-		Background(selectedBg).
-		Foreground(selectedFg).
-		Bold(true)
-	d.Styles.SelectedDesc = d.Styles.SelectedDesc.
-		Background(selectedBg).
-		Foreground(selectedFg)
+	if focused {
+		d.Styles.SelectedTitle = d.Styles.SelectedTitle.
+			Background(selectedBg).
+			Foreground(selectedFg).
+			Bold(true)
+		d.Styles.SelectedDesc = d.Styles.SelectedDesc.
+			Background(selectedBg).
+			Foreground(selectedFg)
+	} else {
+		d.Styles.SelectedTitle = d.Styles.SelectedTitle.Bold(true)
+	}
 	return d
 }
 
-// newPanelList builds a list.Model with this app's shared delegate and its
-// own built-in title/status-bar/help chrome turned off - the panel border
-// (drawn in View) already carries the title, and keybindings live in the
-// single global bar at the bottom of the screen instead of being repeated
-// per panel.
-func newPanelList() list.Model {
-	l := list.New(nil, newListDelegate(), 0, 0)
+// newPanelList builds a list.Model with its own built-in title/status-bar/
+// help/pagination chrome turned off - the panel border (drawn in View)
+// already carries the title, keybindings live in the single global bar at
+// the bottom of the screen instead of being repeated per panel, and with
+// only ever one page of items visible at these panel sizes the pagination
+// dots just take up a row for nothing.
+func newPanelList(focused bool) list.Model {
+	l := list.New(nil, newListDelegate(focused), 0, 0)
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
+	l.SetShowPagination(false)
 	return l
+}
+
+// syncFocusDelegates re-applies the focused/unfocused delegate to each of
+// the Files/Branches/History lists to match m.focus, called whenever focus
+// changes. list.Model has no "am I focused" concept of its own - that's
+// this app's, so the delegate has to be pushed in from outside.
+func (m *Model) syncFocusDelegates() {
+	m.files.SetDelegate(newListDelegate(m.focus == focusFiles))
+	m.branches.SetDelegate(newListDelegate(m.focus == focusBranches))
+	m.history.SetDelegate(newListDelegate(m.focus == focusHistory))
 }
 
 func NewModel(r lore.Runner, repoName string) Model {
 	return Model{
 		runner:   r,
 		repoName: repoName,
-		files:    newPanelList(),
-		branches: newPanelList(),
-		history:  newPanelList(),
+		files:    newPanelList(true), // focusFiles is the initial focus, below
+		branches: newPanelList(false),
+		history:  newPanelList(false),
 		diff:     newDiffModel(0, 0),
 		log:      newCommandLogModel(20),
 		focus:    focusFiles,

@@ -36,10 +36,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "tab", "l":
 		m.focus = (m.focus + 1) % 4
+		m.syncFocusDelegates()
 		return m, nil
 
 	case "shift+tab", "h":
 		m.focus = (m.focus + 3) % 4
+		m.syncFocusDelegates()
 		return m, nil
 
 	case "c":
