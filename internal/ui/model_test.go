@@ -9,8 +9,20 @@ import (
 	"lazylore/internal/lore"
 )
 
+func TestChangedPaths_CombinesStagedThenUnstaged(t *testing.T) {
+	s := lore.Status{
+		Staged:   []lore.FileChange{{Status: 'A', Path: "a.txt"}},
+		Unstaged: []lore.FileChange{{Status: 'M', Path: "b.txt"}},
+	}
+	paths := changedPaths(s)
+	want := []string{"a.txt", "b.txt"}
+	if len(paths) != len(want) || paths[0] != want[0] || paths[1] != want[1] {
+		t.Fatalf("changedPaths = %+v, want %+v", paths, want)
+	}
+}
+
 func TestModel_StatusMsgPopulatesFilesList(t *testing.T) {
-	m := NewModel(&lore.FakeRunner{}, "test-repo")
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	s := lore.Status{
 		Repository: "abc",
 		Staged:     []lore.FileChange{{Status: 'A', Path: "a.txt"}},
@@ -23,7 +35,7 @@ func TestModel_StatusMsgPopulatesFilesList(t *testing.T) {
 }
 
 func TestModel_TabCyclesFocusForward(t *testing.T) {
-	m := NewModel(&lore.FakeRunner{}, "test-repo")
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	if m.focus != focusFiles {
 		t.Fatalf("initial focus = %v, want focusFiles", m.focus)
 	}
@@ -38,7 +50,7 @@ func TestModel_SpaceOnUnstagedFileDispatchesStageCmd(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json stage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 
@@ -80,7 +92,7 @@ func TestModel_EnterOnFileDispatchesLoadDiffCmd(t *testing.T) {
 		"--json diff a.txt": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"a.txt","patch":"+++ a.txt\n","action":"keep"}}
 ` + jsonCompleteSuccess},
 	}}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 
@@ -113,7 +125,7 @@ func TestModel_CommitPromptSubmitsMessage(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json commit hi": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
 	m2 := updated.(Model)
@@ -149,7 +161,7 @@ func TestModel_ActionDoneMsgAppendsToCommandLogAndRefreshes(t *testing.T) {
 ` + jsonCompleteSuccess},
 		"--json history 50": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 	updated, cmd := m.Update(actionDoneMsg{label: "stage a.txt"})
 	m2 := updated.(Model)
 	if len(m2.log.entries) != 1 || m2.log.entries[0] != "stage a.txt: OK" {
@@ -164,7 +176,7 @@ func TestModel_HistoryMsgUpdatesTotalEvenWhileFiltering(t *testing.T) {
 	// Regression: historyMsg used to return early (skipping historyTotal and
 	// chrome bookkeeping) whenever list.SetItems returned a non-nil cmd,
 	// which only happens while the panel has an active filter.
-	m := NewModel(&lore.FakeRunner{}, "test-repo")
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	m.focus = focusHistory
 	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{{Number: 1, Message: "first"}}})
 	m2 := updated.(Model)
@@ -191,7 +203,7 @@ func TestModel_RefreshBranchesListPropagatesFilterCmd(t *testing.T) {
 	// Regression: refreshBranchesList silently dropped the cmd SetItems
 	// returns while the Branches panel has an active filter, so a filtered
 	// view never got reconciled after a refresh.
-	m := NewModel(&lore.FakeRunner{}, "test-repo")
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(branchesMsg{branches: []lore.Branch{{Name: "main", Current: true}, {Name: "dev"}}})
 	m2 := updated.(Model)
 	m2.focus = focusBranches
@@ -210,7 +222,7 @@ func TestModel_RefreshBranchesListPropagatesFilterCmd(t *testing.T) {
 }
 
 func TestModel_LeftStackAndRightColumnPanelOrder(t *testing.T) {
-	m := NewModel(&lore.FakeRunner{}, "test-repo")
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m2 := updated.(Model)
 	v := m2.View()

@@ -119,6 +119,19 @@ func DiscardChanges(r Runner, path string) (Result, error) {
 	return runChecked(r, "reset", path)
 }
 
+// DiscardAllChanges discards every currently staged and unstaged change in
+// the working tree, purging added/untracked paths too. A no-op when paths
+// is empty.
+func DiscardAllChanges(r Runner, paths []string) (Result, error) {
+	if len(paths) == 0 {
+		return Result{}, nil
+	}
+	if _, err := runChecked(r, append([]string{"unstage"}, paths...)...); err != nil {
+		return Result{}, err
+	}
+	return runChecked(r, append([]string{"reset", "--purge"}, paths...)...)
+}
+
 func Commit(r Runner, message string) (Result, error) {
 	return runChecked(r, "commit", message)
 }

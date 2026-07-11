@@ -144,6 +144,34 @@ func TestDiscardChanges_UnstagesThenResetsInOrder(t *testing.T) {
 	}
 }
 
+func TestDiscardAllChanges_UnstagesThenPurgeResetsAllPaths(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json unstage a.txt b.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge a.txt b.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	_, err := lore.DiscardAllChanges(fake, []string{"a.txt", "b.txt"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fake.Calls) != 2 {
+		t.Fatalf("Calls = %+v, want 2 calls", fake.Calls)
+	}
+	if fake.Calls[1][1] != "reset" || fake.Calls[1][2] != "--purge" {
+		t.Fatalf("Calls[1] = %+v, want reset --purge", fake.Calls[1])
+	}
+}
+
+func TestDiscardAllChanges_NoOpOnEmptyPaths(t *testing.T) {
+	fake := &lore.FakeRunner{}
+	_, err := lore.DiscardAllChanges(fake, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fake.Calls) != 0 {
+		t.Fatalf("Calls = %+v, want no runner calls for an empty path list", fake.Calls)
+	}
+}
+
 func TestDiscardChanges_ShortCircuitsWhenUnstageFails(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json unstage a.txt": {ExitCode: 1, Stdout: jsonCompleteFailure},

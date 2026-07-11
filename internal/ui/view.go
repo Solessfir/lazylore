@@ -29,7 +29,7 @@ var (
 // keybindBarText is the global keybinding legend pinned to the very
 // bottom of the screen. Kept to keys handleKey/handlePromptKey actually
 // implement - no promising a "?" help overlay or similar that doesn't exist.
-const keybindBarText = "Focus: tab/h/l | Stage: space | Commit: c | Branch: n | Diff: enter | Discard: d | Select/copy: v | Quit: q"
+const keybindBarText = "Focus: tab/h/l | Stage: space | Commit: c | Edit: e | Branch: n | Diff: enter | Discard: d | Reset: D | Select/copy: v | Quit: q"
 
 // renderPanel is retained for tests that assert on explicit size behavior.
 // It still puts the title inside as content (legacy path). New code uses

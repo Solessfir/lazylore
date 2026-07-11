@@ -105,7 +105,7 @@ func TestRenderTitledPanel_StatusCompact(t *testing.T) {
 func TestModel_StatusTextShowsBranchNotDuplicatedRepoName(t *testing.T) {
 	// Regression: statusText used to render the repo name twice
 	// ("repo(repo) → branch") instead of showing the branch name.
-	m := NewModel(&lore.FakeRunner{}, "myrepo")
+	m := NewModel(&lore.FakeRunner{}, "myrepo", "/repo")
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m2 := updated.(Model)
 	updated, _ = m2.Update(statusMsg{status: lore.Status{Branch: "feature-x"}})

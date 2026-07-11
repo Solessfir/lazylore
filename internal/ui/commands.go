@@ -1,6 +1,11 @@
 package ui
 
 import (
+	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"lazylore/internal/lore"
@@ -53,6 +58,40 @@ func resetCmd(r lore.Runner, path string) tea.Cmd {
 		_, err := lore.DiscardChanges(r, path)
 		return actionDoneMsg{label: "reset " + path, err: err}
 	}
+}
+
+func discardAllCmd(r lore.Runner, paths []string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := lore.DiscardAllChanges(r, paths)
+		return actionDoneMsg{label: "discard all changes", err: err}
+	}
+}
+
+// editorCommand resolves the user's editor the same way git tooling
+// conventionally does (VISUAL then EDITOR), falling back to a platform
+// default, and builds the exec.Cmd to open absPath with it. Env values may
+// carry extra args (e.g. "code -w"), so only the first field is the binary.
+func editorCommand(absPath string) *exec.Cmd {
+	editor := os.Getenv("VISUAL")
+	if editor == "" {
+		editor = os.Getenv("EDITOR")
+	}
+	if editor == "" {
+		if runtime.GOOS == "windows" {
+			editor = "notepad"
+		} else {
+			editor = "vi"
+		}
+	}
+	fields := strings.Fields(editor)
+	args := append(append([]string{}, fields[1:]...), absPath)
+	return exec.Command(fields[0], args...)
+}
+
+func editFileCmd(absPath string) tea.Cmd {
+	return tea.ExecProcess(editorCommand(absPath), func(err error) tea.Msg {
+		return editorDoneMsg{err: err}
+	})
 }
 
 func commitCmd(r lore.Runner, message string) tea.Cmd {

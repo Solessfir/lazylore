@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -23,6 +24,7 @@ const (
 	promptCommit
 	promptNewBranch
 	promptConfirmDiscard
+	promptConfirmDiscardAll
 )
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -118,6 +120,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "D":
+		if m.focus == focusFiles {
+			m.prompt = promptConfirmDiscardAll
+		}
+		return m, nil
+
+	case "e":
+		if m.focus == focusFiles {
+			if item, ok := m.files.SelectedItem().(fileItem); ok && !item.isDir {
+				return m, editFileCmd(filepath.Join(m.repoRoot, item.change.Path))
+			}
+		}
+		return m, nil
+
 	case "enter":
 		switch m.focus {
 		case focusFiles:
@@ -188,6 +204,17 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(
 				func() tea.Msg { return setAppStatusMsg("Discarding...") },
 				resetCmd(m.runner, path),
+			)
+		}
+		return m, nil
+	}
+
+	if m.prompt == promptConfirmDiscardAll {
+		m.prompt = promptNone
+		if msg.String() == "y" {
+			return m, tea.Batch(
+				func() tea.Msg { return setAppStatusMsg("Discarding all changes...") },
+				discardAllCmd(m.runner, changedPaths(m.status)),
 			)
 		}
 		return m, nil

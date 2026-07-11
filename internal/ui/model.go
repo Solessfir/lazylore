@@ -16,6 +16,7 @@ import (
 type Model struct {
 	runner   lore.Runner
 	repoName string
+	repoRoot string // absolute repo root, for resolving file paths lore reports relative to it
 
 	files    list.Model
 	branches list.Model
@@ -313,10 +314,11 @@ func (m *Model) toggleDirCollapse(path string) tea.Cmd {
 	return cmd
 }
 
-func NewModel(r lore.Runner, repoName string) Model {
+func NewModel(r lore.Runner, repoName, repoRoot string) Model {
 	m := Model{
 		runner:        r,
 		repoName:      repoName,
+		repoRoot:      repoRoot,
 		collapsedDirs: map[string]bool{},
 		// focusFiles is the initial focus, below. width is 0 until the first
 		// resize() - fine, syncFocusDelegates rebuilds these once real
@@ -465,6 +467,8 @@ func (m Model) currentFooter() string {
 	switch {
 	case m.prompt == promptConfirmDiscard:
 		return "Discard changes to " + m.pendingDiscardPath + "? (y/N)"
+	case m.prompt == promptConfirmDiscardAll:
+		return "Discard ALL changes in the working tree? (y/N)"
 	case m.prompt != promptNone:
 		return m.input.View()
 	case m.err != nil:
@@ -494,6 +498,20 @@ func (m *Model) ensureDiffForSelectedFile() tea.Cmd {
 	}
 	m.currentDiffPath = item.change.Path
 	return loadDiffCmd(m.runner, item.change.Path)
+}
+
+// changedPaths flattens a Status's staged and unstaged entries into a single
+// path list, for actions (like discard-all) that operate on everything at
+// once rather than one selected file.
+func changedPaths(s lore.Status) []string {
+	paths := make([]string, 0, len(s.Staged)+len(s.Unstaged))
+	for _, c := range s.Staged {
+		paths = append(paths, c.Path)
+	}
+	for _, c := range s.Unstaged {
+		paths = append(paths, c.Path)
+	}
+	return paths
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -607,6 +625,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.log.Append(msg.label + ": OK")
+		return m, refreshCmd(m.runner)
+
+	case editorDoneMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
 		return m, refreshCmd(m.runner)
 	}
 	return m, nil

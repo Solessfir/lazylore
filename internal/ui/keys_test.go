@@ -8,8 +8,89 @@ import (
 	"lazylore/internal/lore"
 )
 
+func TestModel_ShiftDOnFilesOpensDiscardAllConfirmPrompt(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	m2 := updated.(Model)
+	if m2.prompt != promptConfirmDiscardAll {
+		t.Fatalf("prompt = %v, want promptConfirmDiscardAll", m2.prompt)
+	}
+	if cmd != nil {
+		t.Fatalf("expected no Cmd yet (confirmation pending), got %v", cmd)
+	}
+}
+
+func TestModel_YKeyConfirmsDiscardAllForEveryChangedPath(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json unstage a.txt b.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge a.txt b.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{
+		Staged:   []lore.FileChange{{Status: 'A', Path: "a.txt"}},
+		Unstaged: []lore.FileChange{{Status: 'M', Path: "b.txt"}},
+	}})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	m3 := updated.(Model)
+
+	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m4 := updated.(Model)
+	if m4.prompt != promptNone {
+		t.Fatalf("prompt after y = %v, want promptNone", m4.prompt)
+	}
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd after confirming discard-all")
+	}
+	c := cmd()
+	if b, ok := c.(tea.BatchMsg); ok && len(b) > 0 {
+		for _, item := range b {
+			if item != nil {
+				if am, ok := item().(actionDoneMsg); ok {
+					c = am
+					break
+				}
+			}
+		}
+	}
+	am, ok := c.(actionDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %#v, want actionDoneMsg", c)
+	}
+	if am.err != nil {
+		t.Fatalf("unexpected error: %v", am.err)
+	}
+	if len(fake.Calls) != 2 || fake.Calls[0][1] != "unstage" || fake.Calls[1][1] != "reset" {
+		t.Fatalf("Calls = %+v, want unstage then reset --purge across both paths", fake.Calls)
+	}
+}
+
+func TestModel_EKeyOnFileDispatchesEditorCmd(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+
+	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd (tea.ExecProcess) for 'e' on a file")
+	}
+}
+
+func TestModel_EKeyOnDirectoryDoesNothing(t *testing.T) {
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})
+	m2 := updated.(Model)
+
+	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	if cmd != nil {
+		t.Fatal("expected no Cmd for 'e' on a directory")
+	}
+}
+
 func TestModel_VKeyEntersSelectModeAndDisablesMouse(t *testing.T) {
-	m := NewModel(&lore.FakeRunner{}, "test-repo")
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
 	m2 := updated.(Model)
 	if !m2.selectMode {
@@ -21,7 +102,7 @@ func TestModel_VKeyEntersSelectModeAndDisablesMouse(t *testing.T) {
 }
 
 func TestModel_AnyKeyExitsSelectModeAndRestoresMouse(t *testing.T) {
-	m := NewModel(&lore.FakeRunner{}, "test-repo")
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
 	m2 := updated.(Model)
 
@@ -40,7 +121,7 @@ func TestModel_VKeyWhileFilteringGoesToFilterInputNotSelectMode(t *testing.T) {
 	// so it hijacked the keystroke instead of reaching the filter box -
 	// making any filter query containing "v" untypable.
 	fake := &lore.FakeRunner{}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "view.go"}}}})
 	m2 := updated.(Model)
 
@@ -63,7 +144,7 @@ func TestModel_VKeyWhileFilteringGoesToFilterInputNotSelectMode(t *testing.T) {
 }
 
 func TestUpdateFocusedList_RoutesKeysToDiffViewport(t *testing.T) {
-	m := NewModel(&lore.FakeRunner{}, "test-repo")
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	m.focus = focusDiff
 	m.diff.vp.Width = 10
 	m.diff.vp.Height = 2
@@ -85,7 +166,7 @@ func TestHandleKey_FilterModeBypassesGlobalShortcuts(t *testing.T) {
 		"--json unstage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 		"--json reset a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 
@@ -118,7 +199,7 @@ func TestModel_DKeyOnFileOpensDiscardConfirmPrompt(t *testing.T) {
 		"--json unstage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 		"--json reset a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 
@@ -143,7 +224,7 @@ func TestModel_YKeyConfirmsDiscardAndUnstagesThenResets(t *testing.T) {
 		"--json unstage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 		"--json reset a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
@@ -189,7 +270,7 @@ func TestModel_EscCancelsDiscardPromptWithoutRunnerCalls(t *testing.T) {
 		"--json unstage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 		"--json reset a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
@@ -213,7 +294,7 @@ func TestModel_EscCancelsDiscardPromptWithoutRunnerCalls(t *testing.T) {
 
 func TestModel_EnterOnDirectoryTogglesCollapseInsteadOfLoadingDiff(t *testing.T) {
 	fake := &lore.FakeRunner{}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})
 	m2 := updated.(Model)
 
@@ -239,7 +320,7 @@ func TestModel_EnterOnDirectoryTogglesCollapseInsteadOfLoadingDiff(t *testing.T)
 
 func TestModel_SpaceOnDirectoryTogglesCollapseInsteadOfStaging(t *testing.T) {
 	fake := &lore.FakeRunner{}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})
 	m2 := updated.(Model)
 
@@ -257,7 +338,7 @@ func TestModel_SpaceOnDirectoryTogglesCollapseInsteadOfStaging(t *testing.T) {
 
 func TestModel_DKeyOnDirectoryDoesNothing(t *testing.T) {
 	fake := &lore.FakeRunner{}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})
 	m2 := updated.(Model)
 
@@ -271,7 +352,7 @@ func TestModel_DKeyOnDirectoryDoesNothing(t *testing.T) {
 
 func TestModel_CollapsedDirectoryHidesItsFiles(t *testing.T) {
 	fake := &lore.FakeRunner{}
-	m := NewModel(fake, "test-repo")
+	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{
 		{Status: 'M', Path: "src/a.go"},
 		{Status: 'M', Path: "src/b.go"},

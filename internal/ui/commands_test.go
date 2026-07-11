@@ -98,6 +98,54 @@ func TestStageCmd_CallsRunnerAndReturnsActionDoneMsg(t *testing.T) {
 	}
 }
 
+func TestDiscardAllCmd_CallsRunnerForEveryPath(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json unstage a.txt b.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge a.txt b.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	msg := discardAllCmd(fake, []string{"a.txt", "b.txt"})()
+	am, ok := msg.(actionDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %#v, want actionDoneMsg", msg)
+	}
+	if am.err != nil {
+		t.Fatalf("unexpected error: %v", am.err)
+	}
+	if len(fake.Calls) != 2 {
+		t.Fatalf("Calls = %+v, want 2 calls", fake.Calls)
+	}
+}
+
+func TestEditorCommand_UsesVisualOverEditor(t *testing.T) {
+	t.Setenv("VISUAL", "myvisual")
+	t.Setenv("EDITOR", "myeditor")
+	c := editorCommand("/repo/a.txt")
+	if got := c.Args[0]; got != "myvisual" {
+		t.Fatalf("editor binary = %q, want %q", got, "myvisual")
+	}
+	if got := c.Args[len(c.Args)-1]; got != "/repo/a.txt" {
+		t.Fatalf("last arg = %q, want the target path", got)
+	}
+}
+
+func TestEditorCommand_FallsBackToEditorThenPlatformDefault(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "code -w")
+	c := editorCommand("/repo/a.txt")
+	if got := c.Args[0]; got != "code" {
+		t.Fatalf("editor binary = %q, want %q", got, "code")
+	}
+	if got := c.Args[1]; got != "-w" {
+		t.Fatalf("extra editor arg = %q, want %q", got, "-w")
+	}
+
+	t.Setenv("EDITOR", "")
+	c = editorCommand("/repo/a.txt")
+	if c.Args[0] == "" {
+		t.Fatal("expected a non-empty platform-default editor when neither VISUAL nor EDITOR is set")
+	}
+}
+
 func TestCommitCmd_ReturnsErrorOnFailure(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json commit oops": {ExitCode: 1, Stdout: "{\"tagName\":\"complete\",\"data\":{\"status\":-1,\"error\":{\"errorCode\":-1,\"message\":\"nothing staged\",\"traceLocations\":[]}}}\n"},

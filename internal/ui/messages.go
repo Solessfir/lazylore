@@ -31,6 +31,10 @@ type actionDoneMsg struct {
 	err   error
 }
 
+type editorDoneMsg struct {
+	err error
+}
+
 type tickMsg time.Time
 
 type setAppStatusMsg string
