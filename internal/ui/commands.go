@@ -27,13 +27,6 @@ func loadHistoryCmd(r lore.Runner) tea.Cmd {
 	}
 }
 
-func loadStashesCmd(r lore.Runner) tea.Cmd {
-	return func() tea.Msg {
-		s, err := lore.StashList(r)
-		return stashesMsg{stashes: s, err: err}
-	}
-}
-
 func loadDiffCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
 		text, err := lore.Diff(r, path)

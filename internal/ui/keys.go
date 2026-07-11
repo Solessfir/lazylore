@@ -13,7 +13,6 @@ const (
 	focusFiles focusPanel = iota
 	focusBranches
 	focusHistory
-	focusStash
 	focusDiff
 )
 
@@ -41,18 +40,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.DisableMouse
 
 	case "tab", "l":
-		m.focus = (m.focus + 1) % 5
+		m.focus = (m.focus + 1) % 4
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
 		return m, nil
 
 	case "shift+tab", "h":
-		m.focus = (m.focus + 4) % 5
+		m.focus = (m.focus + 3) % 4
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
 		return m, nil
 
-	// Panel jump keys like lazygit (1/2=Files (under Status), 3=Branches, 4=History, 5=Stash, 6=Diff)
+	// Panel jump keys like lazygit (1/2=Files (under Status), 3=Branches, 4=History, 5=Diff)
 	case "1":
 		m.focus = focusFiles
 		m.syncFocusDelegates()
@@ -71,11 +70,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		(&m).recomputePanelHeights()
 		return m, nil
 	case "5":
-		m.focus = focusStash
-		m.syncFocusDelegates()
-		(&m).recomputePanelHeights()
-		return m, nil
-	case "6":
 		m.focus = focusDiff
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
@@ -163,8 +157,6 @@ func (m Model) focusedListIsFiltering() bool {
 		return m.branches.SettingFilter()
 	case focusHistory:
 		return m.history.SettingFilter()
-	case focusStash:
-		return m.stashes.SettingFilter()
 	}
 	return false
 }
@@ -181,8 +173,6 @@ func (m Model) updateFocusedList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.branches, cmd = m.branches.Update(msg)
 	case focusHistory:
 		m.history, cmd = m.history.Update(msg)
-	case focusStash:
-		m.stashes, cmd = m.stashes.Update(msg)
 	case focusDiff:
 		m.diff.vp, cmd = m.diff.vp.Update(msg)
 	}

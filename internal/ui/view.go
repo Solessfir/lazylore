@@ -75,26 +75,20 @@ func (m Model) View() string {
 
 	baseBody := max(0, m.height-footerHeight-keybindBarHeight)
 
-	// Grow using full distribute over (body + extra) so fixed-size panels (status,
-	// unfocused stash) stay fixed and weighted ones (incl. focused stash) fairly
-	// split the extra. This keeps exact sums so left stack height matches right
-	// column (diff + log) height.
+	// Grow using full distribute over (body + extra) so the fixed-size status
+	// panel stays fixed and the weighted ones fairly split the extra. This
+	// keeps exact sums so left stack height matches right column (diff + log)
+	// height.
 	mainAvail := baseBody + extra
-	stashBox := layoutBox{Weight: 1}
-	if m.focus != focusStash {
-		stashBox = layoutBox{Size: 3}
-	}
 	leftOuters := distributeSpace([]layoutBox{
 		{Size: statusPanelHeight},
 		{Weight: 1}, // Files
 		{Weight: 1}, // Branches
 		{Weight: 1}, // History
-		stashBox,    // Stash
 	}, mainAvail)
 	effFilesH := max(0, leftOuters[1]-borderHeight)
 	effBranchesH := max(0, leftOuters[2]-borderHeight)
 	effHistoryH := max(0, leftOuters[3]-borderHeight)
-	effStashH := max(0, leftOuters[4]-borderHeight)
 	effDiffH := m.diffHeight + extra // all footer-saved growth to diff (log fixed size)
 
 	// Re-size widgets for the effective (larger when prompt footer short) content area.
@@ -102,7 +96,6 @@ func (m Model) View() string {
 	m.files.SetSize(m.panelWidth, max(0, effFilesH))
 	m.branches.SetSize(m.panelWidth, max(0, effBranchesH))
 	m.history.SetSize(m.panelWidth, max(0, effHistoryH))
-	m.stashes.SetSize(m.panelWidth, max(0, effStashH))
 	m.diff.vp.Height = max(0, effDiffH)
 
 	// Use titled-border rendering so "Status"/"Files" etc. appear in the top
@@ -139,24 +132,12 @@ func (m Model) View() string {
 			}
 			return p
 		}(),
-		func() string {
-			v := strings.TrimLeft(m.stashes.View(), "\n\r")
-			if m.stashesTotal == 0 || strings.Contains(strings.ToLower(v), "no items") {
-				v = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("lore has no stash - use a branch to set work aside")
-			}
-			p := renderTitledPanel(m.focus == focusStash, m.panelWidth, effStashH, "5", "Stash", v)
-			if m.stashesTotal > 0 {
-				cur := m.stashes.Index() + 1
-				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.stashesTotal), m.focus == focusStash)
-			}
-			return p
-		}(),
 	)
 
 	// Right column: Diff on top, Command Log directly below it (matching lazygit
 	// "extras" panel placement under the main content, not spanning full width).
 	diffW := m.diff.vp.Width + 1
-	diffPanel := renderTitledPanel(m.focus == focusDiff, diffW, effDiffH, "6", "Diff", m.diff.viewWithScrollbar())
+	diffPanel := renderTitledPanel(m.focus == focusDiff, diffW, effDiffH, "5", "Diff", m.diff.viewWithScrollbar())
 
 	logInnerH := max(0, commandLogPanelHeight-borderHeight)
 	logContent := m.log.LastLines(logInnerH)

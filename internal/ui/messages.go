@@ -21,11 +21,6 @@ type historyMsg struct {
 	err       error
 }
 
-type stashesMsg struct {
-	stashes []lore.Stash
-	err     error
-}
-
 type diffMsg struct {
 	text string
 	err  error

@@ -249,26 +249,6 @@ func historyToItems(revisions []lore.Revision) []list.Item {
 	return items
 }
 
-type stashItem struct {
-	stash lore.Stash
-}
-
-func (i stashItem) Title() string {
-	return fmt.Sprintf("%d: %s", i.stash.Index, i.stash.Message)
-}
-
-func (i stashItem) Description() string { return "" }
-
-func (i stashItem) FilterValue() string { return i.Title() }
-
-func stashesToItems(stashes []lore.Stash) []list.Item {
-	items := make([]list.Item, 0, len(stashes))
-	for _, s := range stashes {
-		items = append(items, stashItem{stash: s})
-	}
-	return items
-}
-
 // compactTitleDelegate is a minimal ItemDelegate for single-line branch/history
 // lists. It renders only the Title() on one row (Description is ignored/empty).
 // Selection highlight is a full-width background only on the focused panel,
@@ -362,26 +342,6 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 			purple.Render(author+" ○") +
 			spaceStyle.Render(" ") +
 			msgStyle.Render(msg)
-
-		if selected {
-			fmt.Fprint(w, selectedRowStyle(d.width).Render(display))
-		} else {
-			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).Render(display))
-		}
-		return
-	}
-
-	// Stash items (for the Stash panel below History, matching lazygit layout)
-	if si, ok := listItem.(stashItem); ok {
-		idx := fmt.Sprintf("%d", si.stash.Index)
-		msg := si.stash.Message
-		green := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-		white := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
-		if selected {
-			green = green.Background(selectedBg).Bold(true)
-			white = white.Background(selectedBg)
-		}
-		display := green.Render(idx+": ") + white.Render(msg)
 
 		if selected {
 			fmt.Fprint(w, selectedRowStyle(d.width).Render(display))

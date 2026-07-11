@@ -20,7 +20,6 @@ type Model struct {
 	files    list.Model
 	branches list.Model
 	history  list.Model
-	stashes  list.Model
 	diff     diffModel
 	log      commandLogModel
 
@@ -34,7 +33,6 @@ type Model struct {
 	filesTotal    int
 	branchesTotal int
 	historyTotal  int
-	stashesTotal  int
 
 	currentDiffPath string // last file path we issued a diff load for (avoids spamming loads on every cursor move)
 
@@ -57,7 +55,6 @@ type Model struct {
 	filesHeight    int
 	branchesHeight int
 	historyHeight  int
-	stashHeight    int
 	diffHeight     int
 }
 
@@ -133,7 +130,6 @@ func (m *Model) syncFocusDelegates() {
 	m.files.SetDelegate(fileDelegate{focused: m.focus == focusFiles})
 	m.branches.SetDelegate(compactTitleDelegate{focused: m.focus == focusBranches, width: m.panelWidth})
 	m.history.SetDelegate(compactTitleDelegate{focused: m.focus == focusHistory, width: m.panelWidth})
-	m.stashes.SetDelegate(compactTitleDelegate{focused: m.focus == focusStash, width: m.panelWidth})
 
 	// Re-assert no chrome so "X of Y" count text never appears in bottom right of panels
 	m.files.SetShowStatusBar(false)
@@ -142,8 +138,6 @@ func (m *Model) syncFocusDelegates() {
 	m.branches.SetShowPagination(false)
 	m.history.SetShowStatusBar(false)
 	m.history.SetShowPagination(false)
-	m.stashes.SetShowStatusBar(false)
-	m.stashes.SetShowPagination(false)
 }
 
 // handleMouseClick handles left-clicks to focus panels and select items inside
@@ -170,24 +164,17 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	bodyHeight := max(0, m.height-footerHeight-keybindBarHeight)
 
-	// Use full distribute over grown main area for accurate hit rects (so unfocused
-	// stash stays small, etc). Matches View().
+	// Use full distribute over grown main area for accurate hit rects. Matches View().
 	mainAvail := bodyHeight + extra
-	stashBox := layoutBox{Weight: 1}
-	if m.focus != focusStash {
-		stashBox = layoutBox{Size: 3}
-	}
 	leftOuters := distributeSpace([]layoutBox{
 		{Size: statusPanelHeight},
 		{Weight: 1},
 		{Weight: 1},
 		{Weight: 1},
-		stashBox,
 	}, mainAvail)
 	effFilesH := max(0, leftOuters[1]-borderHeight)
 	effBranchesH := max(0, leftOuters[2]-borderHeight)
 	effHistoryH := max(0, leftOuters[3]-borderHeight)
-	effStashH := max(0, leftOuters[4]-borderHeight)
 	effDiffH := m.diffHeight + extra
 
 	leftW := m.panelWidth + borderWidth
@@ -195,10 +182,9 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	filesH := effFilesH + borderHeight
 	branchesH := effBranchesH + borderHeight
 	historyH := effHistoryH + borderHeight
-	stashH := effStashH + borderHeight
 	diffH := effDiffH + borderHeight
 	// mainH is height of full left stack (and of right column = diff + commandLogPanelHeight)
-	mainH := statusH + filesH + branchesH + historyH + stashH
+	mainH := statusH + filesH + branchesH + historyH
 
 	if y >= mainH {
 		return m, nil // footer / keybind area
@@ -208,7 +194,6 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	filesBoxTop := statusH
 	branchesBoxTop := filesBoxTop + filesH
 	historyBoxTop := branchesBoxTop + branchesH
-	stashBoxTop := historyBoxTop + historyH
 
 	newFocus := m.focus
 	var cmd tea.Cmd
@@ -268,7 +253,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-		case y < stashBoxTop:
+		default:
 			newFocus = focusHistory
 			if y >= historyBoxTop+1 && y < historyBoxTop+historyH-1 {
 				relY := y - (historyBoxTop + 1)
@@ -281,22 +266,6 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 					vis := m.history.VisibleItems()
 					if target < len(vis) {
 						m.history.Select(target)
-					}
-				}
-			}
-		default:
-			newFocus = focusStash
-			if y >= stashBoxTop+1 && y < stashBoxTop+stashH-1 {
-				relY := y - (stashBoxTop + 1)
-				if relY >= 0 && relY < effStashH {
-					perPage := m.stashes.Paginator.PerPage
-					if perPage < 1 {
-						perPage = 1
-					}
-					target := m.stashes.Paginator.Page*perPage + relY
-					vis := m.stashes.VisibleItems()
-					if target < len(vis) {
-						m.stashes.Select(target)
 					}
 				}
 			}
@@ -355,7 +324,6 @@ func NewModel(r lore.Runner, repoName string) Model {
 		files:    newPanelList(fileDelegate{focused: true}),
 		branches: newPanelList(compactTitleDelegate{focused: false, width: 0}),
 		history:  newPanelList(compactTitleDelegate{focused: false, width: 0}),
-		stashes:  newPanelList(compactTitleDelegate{focused: false, width: 0}),
 		diff:     newDiffModel(0, 0),
 		log:      newCommandLogModel(20),
 		focus:    focusFiles,
@@ -368,8 +336,6 @@ func NewModel(r lore.Runner, repoName string) Model {
 	m.branches.SetShowPagination(false)
 	m.history.SetShowStatusBar(false)
 	m.history.SetShowPagination(false)
-	m.stashes.SetShowStatusBar(false)
-	m.stashes.SetShowPagination(false)
 
 	return m
 }
@@ -380,7 +346,6 @@ func (m Model) Init() tea.Cmd {
 		loadStatusCmd(m.runner),
 		loadBranchesCmd(m.runner),
 		loadHistoryCmd(m.runner),
-		loadStashesCmd(m.runner),
 		tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg { return tickMsg{} }),
 	)
 }
@@ -391,7 +356,6 @@ func refreshCmd(r lore.Runner) tea.Cmd {
 		loadStatusCmd(r),
 		loadBranchesCmd(r),
 		loadHistoryCmd(r),
-		loadStashesCmd(r),
 	)
 }
 
@@ -426,7 +390,7 @@ const (
 const commandLogPanelHeight = 5
 
 // resize propagates the terminal size to every sub-widget: a Status panel
-// plus stacked lists on the left (Files/Branches/History/Stash), the diff
+// plus stacked lists on the left (Files/Branches/History), the diff
 // viewport + command log panel below it on the right, plus the prompt/error
 // footer and global keybinding bar.
 //
@@ -446,7 +410,6 @@ func (m *Model) resize() {
 	m.files.SetSize(m.panelWidth, max(0, m.filesHeight))
 	m.branches.SetSize(m.panelWidth, max(0, m.branchesHeight))
 	m.history.SetSize(m.panelWidth, max(0, m.historyHeight))
-	m.stashes.SetSize(m.panelWidth, max(0, m.stashHeight))
 
 	// Leave 1 column inside the panel for the scrollbar (drawn after content, before right border)
 	diffInnerW := max(0, rightWidth-borderWidth)
@@ -460,31 +423,22 @@ func (m *Model) resize() {
 }
 
 // recomputePanelHeights calculates the base inner heights for all panels
-// using distributeSpace. Stash gets a small fixed Size (matching lazygit)
-// unless it is currently focused, in which case it gets Weight:1 and expands.
-// Other variable panels always weight evenly. This must be called on focus
+// using distributeSpace, weighted evenly. This must be called on focus
 // changes (in addition to resize) so that m.*Height bases are up to date for
 // View() eff growth and mouse hit testing.
 func (m *Model) recomputePanelHeights() {
 	bodyHeight := max(0, m.height-footerHeight-keybindBarHeight)
-
-	stashBox := layoutBox{Weight: 1}
-	if m.focus != focusStash {
-		stashBox = layoutBox{Size: 3} // lazygit default for unfocused stash
-	}
 
 	heights := distributeSpace([]layoutBox{
 		{Size: statusPanelHeight}, // Status
 		{Weight: 1},               // Files
 		{Weight: 1},               // Branches
 		{Weight: 1},               // History
-		stashBox,                  // Stash (small unless focused)
 	}, bodyHeight)
 
 	m.filesHeight = max(0, heights[1]-borderHeight)
 	m.branchesHeight = max(0, heights[2]-borderHeight)
 	m.historyHeight = max(0, heights[3]-borderHeight)
-	m.stashHeight = max(0, heights[4]-borderHeight)
 
 	// Diff leaves room under itself for the command log (fixed, right only).
 	cmdLogOuter := commandLogPanelHeight
@@ -634,19 +588,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyTotal = len(items)
 		m.history.SetShowStatusBar(false)
 		m.history.SetShowPagination(false)
-		return m, cmd
-
-	case stashesMsg:
-		m.appStatus = ""
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		items := stashesToItems(msg.stashes)
-		cmd := m.stashes.SetItems(items)
-		m.stashesTotal = len(items)
-		m.stashes.SetShowStatusBar(false)
-		m.stashes.SetShowPagination(false)
 		return m, cmd
 
 	case diffMsg:

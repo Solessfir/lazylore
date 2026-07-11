@@ -209,63 +209,29 @@ func TestModel_RefreshBranchesListPropagatesFilterCmd(t *testing.T) {
 	}
 }
 
-func TestModel_StashPanelRendersBelowHistory(t *testing.T) {
+func TestModel_LeftStackAndRightColumnPanelOrder(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo")
-	// Provide size so resize and View produce panels.
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m2 := updated.(Model)
-	// When not focused, stash should use small default size (Size:3 outer -> height 1 inner) like lazygit.
-	if m2.focus != focusStash && m2.stashHeight > 2 {
-		t.Fatalf("unfocused Stash should have small base height (Size=3), got stashHeight=%d", m2.stashHeight)
-	}
-	// Simulate selecting Stash: base should expand.
-	m2.focus = focusStash
-	m2.recomputePanelHeights()
-	if m2.stashHeight <= 2 {
-		t.Fatalf("focused Stash should have expanded base height, got stashHeight=%d", m2.stashHeight)
-	}
 	v := m2.View()
-	if !strings.Contains(v, "[5]─Stash") {
-		t.Fatalf("View must contain Stash panel title '[5]─Stash' (lazygit layout); got:\n%s", v)
-	}
-	if !strings.Contains(v, "[4]─History") {
-		t.Fatalf("View must still contain History panel; got:\n%s", v)
-	}
-	// Rough order check: History title appears before Stash title in the rendered string.
-	histIdx := strings.Index(v, "[4]─History")
-	stashIdx := strings.Index(v, "[5]─Stash")
-	if histIdx == -1 || stashIdx == -1 || stashIdx < histIdx {
-		t.Fatalf("Stash panel should appear below History in left stack; histIdx=%d stashIdx=%d", histIdx, stashIdx)
+
+	for _, want := range []string{"Status", "[1]─Files", "[3]─", "[4]─History", "[5]─Diff", "Command Log"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("View must contain %q; got:\n%s", want, v)
+		}
 	}
 
-	// Command log must appear below the Diff (not as a full-width footer under left+right).
-	if !strings.Contains(v, "Command Log") {
-		t.Fatalf("View must contain Command Log panel under Diff; got:\n%s", v)
+	// Left stack order: Files above History.
+	filesIdx := strings.Index(v, "[1]─Files")
+	histIdx := strings.Index(v, "[4]─History")
+	if filesIdx == -1 || histIdx == -1 || histIdx < filesIdx {
+		t.Fatalf("History should appear below Files in left stack; filesIdx=%d histIdx=%d", filesIdx, histIdx)
 	}
-	if !strings.Contains(v, "[6]─Diff") {
-		t.Fatalf("View must contain Diff panel titled 6; got:\n%s", v)
-	}
-	// In the text, the Command Log title should come after the Diff title (because right column is vertical Join of diff then log).
-	diffIdx := strings.Index(v, "[6]─Diff")
+
+	// Right column: Command Log directly below Diff.
+	diffIdx := strings.Index(v, "[5]─Diff")
 	logIdx := strings.Index(v, "Command Log")
 	if diffIdx == -1 || logIdx == -1 || logIdx < diffIdx {
 		t.Fatalf("Command Log should appear after/below Diff in right column; diffIdx=%d logIdx=%d", diffIdx, logIdx)
-	}
-
-	// Stash must not contain "No items." text (lazygit behavior for the empty stash panel).
-	// We look for the stash section roughly by its title.
-	stashTitleIdx := strings.Index(v, "[5]─Stash")
-	if stashTitleIdx >= 0 {
-		// Take a window after the stash title (enough for the small panel height).
-		stashSection := v[stashTitleIdx:]
-		if strings.Contains(strings.ToLower(stashSection), "no items") {
-			t.Fatalf("Stash panel must not contain 'No items.' text (matches lazygit); got section:\n%s", stashSection[:min(len(stashSection), 300)])
-		}
-		// Regression: an empty Stash panel used to render as a totally blank,
-		// unlabeled box, indistinguishable from broken. It must say plainly
-		// that lore has no native stash.
-		if !strings.Contains(stashSection, "lore has no stash") {
-			t.Fatalf("empty Stash panel must explain lore has no native stash; got section:\n%s", stashSection[:min(len(stashSection), 300)])
-		}
 	}
 }
