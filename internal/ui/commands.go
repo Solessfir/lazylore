@@ -39,6 +39,24 @@ func loadDiffCmd(r lore.Runner, path string) tea.Cmd {
 	}
 }
 
+func loadLocksCmd(r lore.Runner, paths []string) tea.Cmd {
+	return func() tea.Msg {
+		locks, err := lore.LockStatus(r, paths...)
+		return locksMsg{locks: locks, err: err}
+	}
+}
+
+func lockToggleCmd(r lore.Runner, path string, locked bool) tea.Cmd {
+	return func() tea.Msg {
+		if locked {
+			_, err := lore.LockRelease(r, path)
+			return actionDoneMsg{label: "unlock " + path, err: err}
+		}
+		_, err := lore.LockAcquire(r, path)
+		return actionDoneMsg{label: "lock " + path, err: err}
+	}
+}
+
 func stageCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := lore.Stage(r, path)
@@ -112,5 +130,19 @@ func createBranchCmd(r lore.Runner, name string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := lore.CreateBranch(r, name)
 		return actionDoneMsg{label: "create branch " + name, err: err}
+	}
+}
+
+func resetBranchCmd(r lore.Runner, revision, label string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := lore.ResetBranchTo(r, revision)
+		return actionDoneMsg{label: label, err: err}
+	}
+}
+
+func syncToCmd(r lore.Runner, revision, label string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := lore.SyncTo(r, revision)
+		return actionDoneMsg{label: label, err: err}
 	}
 }

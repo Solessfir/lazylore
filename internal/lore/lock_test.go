@@ -1,0 +1,63 @@
+package lore_test
+
+import (
+	"testing"
+
+	"lazylore/internal/lore"
+)
+
+func TestLockStatus_ParsesLockedPaths(t *testing.T) {
+	// Captured shape from lore-revision/src/lock/file/status.rs:
+	// LoreLockFileStatusBeginEventData{count} + LoreLockFileStatusEventData
+	// per locked path (unlocked paths simply don't appear).
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json lock status a.txt b.txt": {ExitCode: 0, Stdout: `{"tagName":"lockFileStatusBegin","data":{"count":1}}
+{"tagName":"lockFileStatus","data":{"path":"a.txt","owner":"user-123","lockedAt":1750000000000}}
+{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
+`},
+	}}
+	locks, err := lore.LockStatus(fake, "a.txt", "b.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(locks) != 1 {
+		t.Fatalf("locks = %+v, want 1 entry (only a.txt is locked)", locks)
+	}
+	if locks[0].Path != "a.txt" || locks[0].Owner != "user-123" || locks[0].LockedAt != 1750000000000 {
+		t.Fatalf("locks[0] = %+v, unexpected values", locks[0])
+	}
+}
+
+func TestLockStatus_NoOpOnEmptyPaths(t *testing.T) {
+	fake := &lore.FakeRunner{}
+	locks, err := lore.LockStatus(fake)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if locks != nil {
+		t.Fatalf("locks = %+v, want nil for an empty path list", locks)
+	}
+	if len(fake.Calls) != 0 {
+		t.Fatalf("Calls = %+v, want no runner calls for an empty path list", fake.Calls)
+	}
+}
+
+func TestLockAcquire_BuildsArgs(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json lock acquire a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	_, err := lore.LockAcquire(fake, "a.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLockRelease_BuildsArgs(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json lock release a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	_, err := lore.LockRelease(fake, "a.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

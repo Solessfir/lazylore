@@ -26,18 +26,40 @@ func TestKeybindBarFor_FilesMatchesLazygitsDisplayOnScreenSet(t *testing.T) {
 	// Ground truth: pkg/gui/controllers/files_controller.go's DisplayOnScreen:
 	// true bindings, in registration order (Select/space, CommitChanges/c,
 	// Edit/e, Remove/d, ViewResetOptions/D) - Stash dropped since lore has
-	// none, Diff/enter is lazylore's own file-diff-load action.
+	// none, Diff/enter is lazylore's own file-diff-load action, Lock/L is
+	// lore-native (git/lazygit have no locking concept).
 	got := keybindBarFor(focusFiles)
-	want := "Stage: <space> | Commit: c | Edit: e | Diff: <enter> | Discard: d | Reset: D"
+	want := "Stage: <space> | Commit: c | Edit: e | Diff: <enter> | Discard: d | Reset: D | Lock: L"
 	if got != want {
 		t.Fatalf("keybindBarFor(focusFiles) = %q, want %q", got, want)
 	}
 }
 
-func TestKeybindBarFor_HistoryAndDiffHaveNoBoundActionsYet(t *testing.T) {
-	if got := keybindBarFor(focusHistory); got != "" {
-		t.Fatalf("keybindBarFor(focusHistory) = %q, want empty (no History-specific action implemented)", got)
+func TestKeybindBarFor_BranchesMatchesLazygitsSupportedSubset(t *testing.T) {
+	// Ground truth: branches_controller.go's DisplayOnScreen set is
+	// Checkout(space)/New(n)/Delete(d)/Rebase(r)/Merge(M)/Reset(g)/Upstream(u).
+	// lore has no delete/rebase/merge/upstream equivalent (checked
+	// lore-cli-commands.md), so only Checkout/New/Reset carry over.
+	got := keybindBarFor(focusBranches)
+	want := "Checkout: <space> | New branch: n | Reset: g"
+	if got != want {
+		t.Fatalf("keybindBarFor(focusBranches) = %q, want %q", got, want)
 	}
+}
+
+func TestKeybindBarFor_HistoryMatchesLazygitsSupportedSubset(t *testing.T) {
+	// Ground truth: local_commits_controller.go's Commits DisplayOnScreen set
+	// includes Squash/Fixup/Reword/Drop/Edit/Amend, none of which lore
+	// supports (no rebase-style history rewrite) - only Checkout(space, via
+	// `lore sync`) and Reset(g, via `lore branch reset`) carry over.
+	got := keybindBarFor(focusHistory)
+	want := "Checkout: <space> | Reset: g"
+	if got != want {
+		t.Fatalf("keybindBarFor(focusHistory) = %q, want %q", got, want)
+	}
+}
+
+func TestKeybindBarFor_DiffHasNoBoundActionsYet(t *testing.T) {
 	if got := keybindBarFor(focusDiff); got != "" {
 		t.Fatalf("keybindBarFor(focusDiff) = %q, want empty (Diff panel is scroll-only)", got)
 	}

@@ -21,6 +21,11 @@ type historyMsg struct {
 	err       error
 }
 
+type locksMsg struct {
+	locks []lore.Lock
+	err   error
+}
+
 type diffMsg struct {
 	text string
 	err  error

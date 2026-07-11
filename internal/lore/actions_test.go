@@ -172,6 +172,26 @@ func TestDiscardAllChanges_NoOpOnEmptyPaths(t *testing.T) {
 	}
 }
 
+func TestResetBranchTo_BuildsArgs(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json branch reset abc123": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	_, err := lore.ResetBranchTo(fake, "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSyncTo_BuildsArgs(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json sync abc123": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	_, err := lore.SyncTo(fake, "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestDiscardChanges_ShortCircuitsWhenUnstageFails(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json unstage a.txt": {ExitCode: 1, Stdout: jsonCompleteFailure},

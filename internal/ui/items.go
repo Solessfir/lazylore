@@ -24,6 +24,12 @@ var (
 	fileUnstagedColor = lipgloss.Color("1") // red
 )
 
+// lockBadge marks a file with an active lore file lock (any owner - see
+// internal/lore/lock.go; git/lazygit have no equivalent concept).
+const lockBadge = "\U0001F512" // 🔒
+
+var lockBadgeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
+
 func fileStatusColor(staged bool) lipgloss.Color {
 	if staged {
 		return fileStagedColor
@@ -50,6 +56,7 @@ type fileItem struct {
 	change    lore.FileChange
 	staged    bool
 	collapsed bool // only meaningful when isDir
+	locked    bool // only meaningful for files; lore lock held by anyone
 }
 
 func (i fileItem) FilterValue() string { return i.path }
@@ -110,6 +117,9 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		statusStyle := lipgloss.NewStyle().Foreground(fileStatusColor(fi.staged))
 		nameStyle := fileNameStyle(fi.staged)
 		line := indent + statusStyle.Render(string(fi.change.Status)) + " " + nameStyle.Render(fi.baseName())
+		if fi.locked {
+			line += " " + lockBadgeStyle.Render(lockBadge)
+		}
 		fmt.Fprint(w, line)
 		return
 	}
@@ -149,6 +159,9 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		statStyle.Render(string(fi.change.Status)) +
 		selSpace.Render(" ") +
 		nameStyle.Render(fi.baseName())
+	if fi.locked {
+		colored += selSpace.Render(" ") + lockBadgeStyle.Background(selectedBg).Render(lockBadge)
+	}
 
 	// selectedRowStyle ensures full-width background fill (including gutter area)
 	fmt.Fprint(w, selectedRowStyle(rowWidth).Render(colored))
@@ -156,12 +169,14 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 
 // statusToItems flattens a Status's changed files into a directory tree
 // (see filetree.go), respecting which directories are currently collapsed.
-func statusToItems(s lore.Status, collapsedDirs map[string]bool) []list.Item {
+// locks maps path -> held lock (see loadLocksCmd); nil is fine (no badges).
+func statusToItems(s lore.Status, collapsedDirs map[string]bool, locks map[string]lore.Lock) []list.Item {
 	tree := buildFileTree(s)
 	rows := flattenFileTree(tree, collapsedDirs)
 
 	items := make([]list.Item, 0, len(rows))
 	for _, row := range rows {
+		_, locked := locks[row.node.path]
 		items = append(items, fileItem{
 			path:      row.node.path,
 			isDir:     row.node.isDir,
@@ -169,6 +184,7 @@ func statusToItems(s lore.Status, collapsedDirs map[string]bool) []list.Item {
 			change:    row.node.change,
 			staged:    row.node.staged,
 			collapsed: collapsedDirs[row.node.path],
+			locked:    locked,
 		})
 	}
 	return items
@@ -223,6 +239,15 @@ func branchRecency(b lore.Branch) string {
 		return fmt.Sprintf("%dh", h)
 	}
 	return " 1h"
+}
+
+// shortHash truncates a revision hash to the compact form shown in the
+// History panel and used in confirm prompts/command-log labels.
+func shortHash(h string) string {
+	if len(h) > 8 {
+		return h[:8]
+	}
+	return h
 }
 
 type revisionItem struct {
@@ -311,8 +336,8 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 		hash := ri.revision.Hash
 		if hash == "" {
 			hash = fmt.Sprintf("%d", ri.revision.Number)
-		} else if len(hash) > 8 {
-			hash = hash[:8]
+		} else {
+			hash = shortHash(hash)
 		}
 		author := ri.revision.Author
 		if author == "" {

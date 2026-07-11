@@ -25,6 +25,7 @@ const (
 	promptNewBranch
 	promptConfirmDiscard
 	promptConfirmDiscardAll
+	promptConfirmBranchReset
 )
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -92,7 +93,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 
 	case " ":
-		if m.focus == focusFiles {
+		switch m.focus {
+		case focusFiles:
 			if item, ok := m.files.SelectedItem().(fileItem); ok {
 				if item.isDir {
 					return m, m.toggleDirCollapse(item.path)
@@ -106,6 +108,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(
 					func() tea.Msg { return setAppStatusMsg("Staging...") },
 					stageCmd(m.runner, item.change.Path),
+				)
+			}
+		case focusBranches:
+			// Checkout, matching lazygit's Branches-panel space key.
+			if item, ok := m.branches.SelectedItem().(branchItem); ok {
+				return m, tea.Batch(
+					func() tea.Msg { return setAppStatusMsg("Checking out...") },
+					switchBranchCmd(m.runner, item.branch.Name),
+				)
+			}
+		case focusHistory:
+			// Checkout, matching lazygit's Commits-panel space key: sync the
+			// working state to the selected revision.
+			if item, ok := m.history.SelectedItem().(revisionItem); ok && item.revision.Hash != "" {
+				return m, tea.Batch(
+					func() tea.Msg { return setAppStatusMsg("Checking out...") },
+					syncToCmd(m.runner, item.revision.Hash, "checkout "+shortHash(item.revision.Hash)),
 				)
 			}
 		}
@@ -135,8 +154,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		switch m.focus {
-		case focusFiles:
+		if m.focus == focusFiles {
 			if item, ok := m.files.SelectedItem().(fileItem); ok {
 				if item.isDir {
 					return m, m.toggleDirCollapse(item.path)
@@ -146,11 +164,35 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					loadDiffCmd(m.runner, item.change.Path),
 				)
 			}
+		}
+		return m, nil
+
+	case "g":
+		// Reset: move the current branch's latest pointer, matching lazygit's
+		// Branches/Commits-panel "g" (ViewResetOptions) - lore's branch reset
+		// only moves the pointer, so there's no hard/soft/mixed menu to show.
+		switch m.focus {
 		case focusBranches:
-			if item, ok := m.branches.SelectedItem().(branchItem); ok {
+			if item, ok := m.branches.SelectedItem().(branchItem); ok && item.branch.Latest != "" {
+				m.prompt = promptConfirmBranchReset
+				m.pendingResetRevision = item.branch.Latest
+				m.pendingResetLabel = "Reset current branch to " + item.branch.Name
+			}
+		case focusHistory:
+			if item, ok := m.history.SelectedItem().(revisionItem); ok && item.revision.Hash != "" {
+				m.prompt = promptConfirmBranchReset
+				m.pendingResetRevision = item.revision.Hash
+				m.pendingResetLabel = "Reset current branch to revision " + shortHash(item.revision.Hash)
+			}
+		}
+		return m, nil
+
+	case "L":
+		if m.focus == focusFiles {
+			if item, ok := m.files.SelectedItem().(fileItem); ok && !item.isDir {
 				return m, tea.Batch(
-					func() tea.Msg { return setAppStatusMsg("Switching branch...") },
-					switchBranchCmd(m.runner, item.branch.Name),
+					func() tea.Msg { return setAppStatusMsg("Updating lock...") },
+					lockToggleCmd(m.runner, item.change.Path, item.locked),
 				)
 			}
 		}
@@ -215,6 +257,21 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(
 				func() tea.Msg { return setAppStatusMsg("Discarding all changes...") },
 				discardAllCmd(m.runner, changedPaths(m.status)),
+			)
+		}
+		return m, nil
+	}
+
+	if m.prompt == promptConfirmBranchReset {
+		m.prompt = promptNone
+		revision := m.pendingResetRevision
+		label := m.pendingResetLabel
+		m.pendingResetRevision = ""
+		m.pendingResetLabel = ""
+		if msg.String() == "y" {
+			return m, tea.Batch(
+				func() tea.Msg { return setAppStatusMsg("Resetting...") },
+				resetBranchCmd(m.runner, revision, label),
 			)
 		}
 		return m, nil

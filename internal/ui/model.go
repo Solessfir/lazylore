@@ -37,14 +37,17 @@ type Model struct {
 
 	currentDiffPath string // last file path we issued a diff load for (avoids spamming loads on every cursor move)
 
-	focus              focusPanel
-	prompt             promptKind
-	input              textinput.Model
-	pendingDiscardPath string
-	selectMode         bool // mouse capture dropped so the terminal can select text (mirrors lazyp4)
+	focus                focusPanel
+	prompt               promptKind
+	input                textinput.Model
+	pendingDiscardPath   string
+	pendingResetRevision string // revision `g` (branch reset) will target once confirmed
+	pendingResetLabel    string // human phrase for the confirm footer + command log, e.g. "Reset current branch to main"
+	selectMode           bool   // mouse capture dropped so the terminal can select text (mirrors lazyp4)
 
 	status        lore.Status
-	collapsedDirs map[string]bool // Files-panel tree: which directory paths are closed
+	collapsedDirs map[string]bool      // Files-panel tree: which directory paths are closed
+	locks         map[string]lore.Lock // path -> lock, for files currently shown in the Files panel
 	err           error
 
 	width, height int
@@ -306,7 +309,7 @@ func (m *Model) toggleDirCollapse(path string) tea.Cmd {
 		m.collapsedDirs = map[string]bool{}
 	}
 	m.collapsedDirs[path] = !m.collapsedDirs[path]
-	items := statusToItems(m.status, m.collapsedDirs)
+	items := statusToItems(m.status, m.collapsedDirs, m.locks)
 	cmd := m.files.SetItems(items)
 	m.filesTotal = len(items)
 	m.files.SetShowStatusBar(false)
@@ -469,6 +472,8 @@ func (m Model) currentFooter() string {
 		return "Discard changes to " + m.pendingDiscardPath + "? (y/N)"
 	case m.prompt == promptConfirmDiscardAll:
 		return "Discard ALL changes in the working tree? (y/N)"
+	case m.prompt == promptConfirmBranchReset:
+		return m.pendingResetLabel + "? (y/N)"
 	case m.prompt != promptNone:
 		return m.input.View()
 	case m.err != nil:
@@ -564,13 +569,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Force a diff refresh for the current selection because the
 		// working tree (or staged state) may have changed.
 		m.currentDiffPath = ""
-		items := statusToItems(msg.status, m.collapsedDirs)
+		items := statusToItems(msg.status, m.collapsedDirs, m.locks)
 		setCmd := m.files.SetItems(items)
 		m.filesTotal = len(items)
 		m.files.SetShowStatusBar(false)
 		m.files.SetShowPagination(false)
 		diffCmd := m.ensureDiffForSelectedFile()
-		return m, tea.Batch(setCmd, diffCmd)
+		lockCmd := loadLocksCmd(m.runner, changedPaths(msg.status))
+		return m, tea.Batch(setCmd, diffCmd, lockCmd)
 
 	case branchesMsg:
 		m.appStatus = ""
@@ -606,6 +612,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyTotal = len(items)
 		m.history.SetShowStatusBar(false)
 		m.history.SetShowPagination(false)
+		return m, cmd
+
+	case locksMsg:
+		// Best-effort: locks require an online remote (see internal/lore/lock.go),
+		// so a failure here (e.g. offline) shouldn't raise the main error banner
+		// on every refresh - the Files panel just shows no lock badges.
+		if msg.err != nil {
+			return m, nil
+		}
+		locks := make(map[string]lore.Lock, len(msg.locks))
+		for _, l := range msg.locks {
+			locks[l.Path] = l
+		}
+		m.locks = locks
+		items := statusToItems(m.status, m.collapsedDirs, m.locks)
+		cmd := m.files.SetItems(items)
+		m.filesTotal = len(items)
 		return m, cmd
 
 	case diffMsg:

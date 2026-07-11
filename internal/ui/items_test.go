@@ -75,7 +75,7 @@ func TestStatusToItems_StagedThenUnstaged(t *testing.T) {
 		Staged:   []lore.FileChange{{Status: 'A', Path: "a.txt"}},
 		Unstaged: []lore.FileChange{{Status: 'M', Path: "b.txt"}},
 	}
-	items := statusToItems(s, nil)
+	items := statusToItems(s, nil, nil)
 	if len(items) != 2 {
 		t.Fatalf("items = %+v, want 2 entries", items)
 	}
@@ -86,6 +86,31 @@ func TestStatusToItems_StagedThenUnstaged(t *testing.T) {
 	second, ok := items[1].(fileItem)
 	if !ok || second.staged || second.change.Path != "b.txt" {
 		t.Fatalf("items[1] = %+v, want the unstaged b.txt entry second", items[1])
+	}
+}
+
+func TestStatusToItems_MarksLockedFiles(t *testing.T) {
+	s := lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}, {Status: 'M', Path: "b.txt"}}}
+	locks := map[string]lore.Lock{"a.txt": {Path: "a.txt", Owner: "someone"}}
+	items := statusToItems(s, nil, locks)
+	a, ok := items[0].(fileItem)
+	if !ok || !a.locked {
+		t.Fatalf("items[0] = %+v, want a.txt marked locked", items[0])
+	}
+	b, ok := items[1].(fileItem)
+	if !ok || b.locked {
+		t.Fatalf("items[1] = %+v, want b.txt not locked", items[1])
+	}
+}
+
+func TestFileDelegate_RenderShowsLockBadgeForLockedFile(t *testing.T) {
+	item := fileItem{path: "a.txt", change: lore.FileChange{Status: 'M', Path: "a.txt"}, locked: true}
+	l := list.New([]list.Item{item}, fileDelegate{focused: false}, 40, 5)
+
+	var buf bytes.Buffer
+	fileDelegate{focused: false}.Render(&buf, l, 0, item)
+	if !bytes.Contains(buf.Bytes(), []byte(lockBadge)) {
+		t.Fatalf("rendered output missing the lock badge: %q", buf.String())
 	}
 }
 

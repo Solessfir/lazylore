@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -18,6 +19,62 @@ func TestChangedPaths_CombinesStagedThenUnstaged(t *testing.T) {
 	want := []string{"a.txt", "b.txt"}
 	if len(paths) != len(want) || paths[0] != want[0] || paths[1] != want[1] {
 		t.Fatalf("changedPaths = %+v, want %+v", paths, want)
+	}
+}
+
+func TestModel_StatusMsgBatchesLockStatusForChangedPaths(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json lock status a.txt": {ExitCode: 0, Stdout: `{"tagName":"lockFileStatusBegin","data":{"count":1}}
+{"tagName":"lockFileStatus","data":{"path":"a.txt","owner":"someone","lockedAt":1}}
+{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
+`},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, cmd := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected a non-nil batched Cmd after statusMsg")
+	}
+
+	b, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("cmd() = %#v, want tea.BatchMsg", cmd())
+	}
+	var lm locksMsg
+	found := false
+	for _, sub := range b {
+		if sub == nil {
+			continue
+		}
+		if got, ok := sub().(locksMsg); ok {
+			lm, found = got, true
+		}
+	}
+	if !found {
+		t.Fatal("expected one of the batched cmds to produce a locksMsg")
+	}
+	if lm.err != nil || len(lm.locks) != 1 || lm.locks[0].Path != "a.txt" {
+		t.Fatalf("locksMsg = %+v, unexpected (should only cover the one changed path)", lm)
+	}
+
+	// Update() must be fed the locksMsg for m.locks/badges to actually
+	// update - simulate what the runtime does after the cmd resolves.
+	updated, _ = m2.Update(lm)
+	m3 := updated.(Model)
+	item, ok := m3.files.SelectedItem().(fileItem)
+	if !ok || !item.locked {
+		t.Fatalf("selected item = %+v, want a.txt marked locked after locksMsg", item)
+	}
+}
+
+func TestModel_LocksMsgErrorIsSwallowed(t *testing.T) {
+	// Locking requires an online remote; a failure here (e.g. offline) must
+	// not raise the main error banner on every refresh.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(locksMsg{err: errors.New("offline")})
+	m2 := updated.(Model)
+	if m2.err != nil {
+		t.Fatalf("err = %v, want nil (locks are best-effort)", m2.err)
 	}
 }
 

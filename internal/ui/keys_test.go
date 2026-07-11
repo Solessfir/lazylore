@@ -8,6 +8,182 @@ import (
 	"lazylore/internal/lore"
 )
 
+// runBatch executes cmd and, if it's a tea.Batch, every sub-cmd too - real
+// ordering/concurrency doesn't matter here, only that every runner call in
+// the batch actually happens.
+func runBatch(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	if b, ok := cmd().(tea.BatchMsg); ok {
+		for _, sub := range b {
+			runBatch(sub)
+		}
+	}
+}
+
+func TestModel_SpaceOnBranchesChecksOutSelectedBranch(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json branch switch dev": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	m.focus = focusBranches
+	updated, _ := m.Update(branchesMsg{branches: []lore.Branch{{Name: "main", Current: true}, {Name: "dev"}}})
+	m2 := updated.(Model)
+	m2.branches.Select(1) // "dev"
+
+	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd for space on a branch")
+	}
+	msg := cmd()
+	if b, ok := msg.(tea.BatchMsg); ok && len(b) > 0 {
+		for _, item := range b {
+			if item != nil {
+				if am, ok := item().(actionDoneMsg); ok {
+					msg = am
+					break
+				}
+			}
+		}
+	}
+	am, ok := msg.(actionDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %#v, want actionDoneMsg", msg)
+	}
+	if am.err != nil {
+		t.Fatalf("unexpected error: %v", am.err)
+	}
+	if len(fake.Calls) != 1 || fake.Calls[0][1] != "branch" || fake.Calls[0][2] != "switch" || fake.Calls[0][3] != "dev" {
+		t.Fatalf("Calls = %+v, want a single branch switch call", fake.Calls)
+	}
+}
+
+func TestModel_GKeyOnBranchesOpensResetConfirmWithBranchLatest(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.focus = focusBranches
+	updated, _ := m.Update(branchesMsg{branches: []lore.Branch{
+		{Name: "main", Current: true},
+		{Name: "dev", Latest: "abc123"},
+	}})
+	m2 := updated.(Model)
+	m2.branches.Select(1) // "dev"
+
+	updated, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	m3 := updated.(Model)
+	if m3.prompt != promptConfirmBranchReset {
+		t.Fatalf("prompt = %v, want promptConfirmBranchReset", m3.prompt)
+	}
+	if m3.pendingResetRevision != "abc123" {
+		t.Fatalf("pendingResetRevision = %q, want %q", m3.pendingResetRevision, "abc123")
+	}
+	if cmd != nil {
+		t.Fatalf("expected no Cmd yet (confirmation pending), got %v", cmd)
+	}
+}
+
+func TestModel_YKeyConfirmsBranchReset(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json branch reset abc123": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	m.focus = focusBranches
+	updated, _ := m.Update(branchesMsg{branches: []lore.Branch{
+		{Name: "main", Current: true},
+		{Name: "dev", Latest: "abc123"},
+	}})
+	m2 := updated.(Model)
+	m2.branches.Select(1)
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	m3 := updated.(Model)
+
+	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m4 := updated.(Model)
+	if m4.prompt != promptNone {
+		t.Fatalf("prompt after y = %v, want promptNone", m4.prompt)
+	}
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd after confirming reset")
+	}
+	runBatch(cmd)
+	if len(fake.Calls) != 1 || fake.Calls[0][1] != "branch" || fake.Calls[0][2] != "reset" || fake.Calls[0][3] != "abc123" {
+		t.Fatalf("Calls = %+v, want a single branch reset call", fake.Calls)
+	}
+}
+
+func TestModel_SpaceOnHistoryChecksOutSelectedRevision(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json sync abc123": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	m.focus = focusHistory
+	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{{Number: 1, Hash: "abc123", Message: "first"}}})
+	m2 := updated.(Model)
+
+	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd for space on a revision")
+	}
+	runBatch(cmd)
+	if len(fake.Calls) != 1 || fake.Calls[0][1] != "sync" || fake.Calls[0][2] != "abc123" {
+		t.Fatalf("Calls = %+v, want a single sync call", fake.Calls)
+	}
+}
+
+func TestModel_GKeyOnHistoryOpensResetConfirmWithRevisionHash(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.focus = focusHistory
+	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{{Number: 1, Hash: "abcdef1234567890", Message: "first"}}})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	m3 := updated.(Model)
+	if m3.prompt != promptConfirmBranchReset {
+		t.Fatalf("prompt = %v, want promptConfirmBranchReset", m3.prompt)
+	}
+	if m3.pendingResetRevision != "abcdef1234567890" {
+		t.Fatalf("pendingResetRevision = %q, want the full hash", m3.pendingResetRevision)
+	}
+}
+
+func TestModel_LKeyOnUnlockedFileAcquiresLock(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json lock acquire a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+
+	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd for L on a file")
+	}
+	runBatch(cmd)
+	if len(fake.Calls) != 1 || fake.Calls[0][1] != "lock" || fake.Calls[0][2] != "acquire" {
+		t.Fatalf("Calls = %+v, want a single lock acquire call", fake.Calls)
+	}
+}
+
+func TestModel_LKeyOnLockedFileReleasesLock(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json lock release a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(locksMsg{locks: []lore.Lock{{Path: "a.txt", Owner: "someone"}}})
+	m3 := updated.(Model)
+
+	_, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd for L on a locked file")
+	}
+	runBatch(cmd)
+	if len(fake.Calls) != 1 || fake.Calls[0][1] != "lock" || fake.Calls[0][2] != "release" {
+		t.Fatalf("Calls = %+v, want a single lock release call", fake.Calls)
+	}
+}
+
 func TestModel_ShiftDOnFilesOpensDiscardAllConfirmPrompt(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})

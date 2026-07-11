@@ -132,6 +132,20 @@ func DiscardAllChanges(r Runner, paths []string) (Result, error) {
 	return runChecked(r, append([]string{"reset", "--purge"}, paths...)...)
 }
 
+// ResetBranchTo moves the current branch's latest pointer to revision -
+// lore's own reset primitive only moves the pointer (no git-style
+// hard/soft/mixed working-tree modes to choose between).
+func ResetBranchTo(r Runner, revision string) (Result, error) {
+	return runChecked(r, "branch", "reset", revision)
+}
+
+// SyncTo synchronizes the working state to revision. If revision belongs to
+// a different branch than the current one, lore updates the current branch
+// accordingly (lore's equivalent of checking out an arbitrary commit).
+func SyncTo(r Runner, revision string) (Result, error) {
+	return runChecked(r, "sync", revision)
+}
+
 func Commit(r Runner, message string) (Result, error) {
 	return runChecked(r, "commit", message)
 }
