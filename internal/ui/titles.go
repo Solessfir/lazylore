@@ -111,11 +111,9 @@ func injectDualTitle(rendered, num, firstName, secondName string, firstActive bo
 
 	prefix := "─[" + num + "]─ "
 	separator := " - "
-	activeLabel := firstName
-	inactiveLabel := secondName
+	firstStyle, secondStyle := activeStyle, inactiveStyle
 	if !firstActive {
-		activeLabel = secondName
-		inactiveLabel = firstName
+		firstStyle, secondStyle = inactiveStyle, activeStyle
 	}
 
 	plainLabel := prefix + firstName + separator + secondName
@@ -126,9 +124,9 @@ func injectDualTitle(rendered, num, firstName, secondName string, firstActive bo
 	}
 
 	top := borderStyle.Render("╭"+prefix) +
-		activeStyle.Render(activeLabel) +
+		firstStyle.Render(firstName) +
 		borderStyle.Render(separator) +
-		inactiveStyle.Render(inactiveLabel) +
+		secondStyle.Render(secondName) +
 		borderStyle.Render(strings.Repeat("─", dashCount)+"╮")
 
 	lines[0] = top
