@@ -29,6 +29,15 @@ func (m *diffModel) SetContent(text string) {
 	m.vp.SetContent(colored)
 }
 
+// SetContentRaw sets already-styled content (e.g. a branch log) without
+// running it through colorizeDiff, which would misinterpret any line that
+// happens to start with "+"/"-" (a commit message, an author name) as a
+// diff addition/deletion.
+func (m *diffModel) SetContentRaw(text string) {
+	m.totalLines = len(strings.Split(text, "\n"))
+	m.vp.SetContent(text)
+}
+
 // viewWithScrollbar returns the diff content with a simple right-side scrollbar
 // (visible when total content > visible height). The scrollbar appears just
 // inside the right border to approximate lazygit behavior.

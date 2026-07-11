@@ -250,6 +250,26 @@ func shortHash(h string) string {
 	return h
 }
 
+// formatBranchLog renders a branch's revision list as plain colored text
+// for the main panel's "Log" view (Branches focused) - one line per
+// revision, matching the History panel's own hash/author/message styling.
+func formatBranchLog(revisions []lore.Revision) string {
+	if len(revisions) == 0 {
+		return "No revisions."
+	}
+	green := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	purple := lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	lines := make([]string, 0, len(revisions))
+	for _, rv := range revisions {
+		author := rv.Author
+		if author == "" {
+			author = "unknown"
+		}
+		lines = append(lines, green.Render(shortHash(rv.Hash))+" "+purple.Render(author)+" "+rv.Message)
+	}
+	return strings.Join(lines, "\n")
+}
+
 type revisionItem struct {
 	revision lore.Revision
 }

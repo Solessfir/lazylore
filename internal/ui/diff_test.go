@@ -29,3 +29,16 @@ func TestNewDiffModel_SetContentDoesNotPanic(t *testing.T) {
 	m := newDiffModel(80, 24)
 	m.SetContent("some diff text\n")
 }
+
+func TestDiffModel_SetContentRawSkipsDiffColoring(t *testing.T) {
+	// Regression: a branch log line like "abc123 - fix bug" starts with a
+	// literal "-" character. Routed through SetContent (colorizeDiff), that
+	// would get wrongly styled as a diff deletion; SetContentRaw must leave
+	// it untouched.
+	m := newDiffModel(80, 24)
+	m.SetContentRaw("abc123 dev - fix bug\nmore text")
+	view := m.vp.View()
+	if !containsSubstring(view, "fix bug") {
+		t.Fatalf("SetContentRaw content missing from viewport view: %q", view)
+	}
+}

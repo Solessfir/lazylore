@@ -35,7 +35,16 @@ type Model struct {
 	branchesTotal int
 	historyTotal  int
 
-	currentDiffPath string // last file path we issued a diff load for (avoids spamming loads on every cursor move)
+	currentDiffPath  string // last file path we issued a diff load for (avoids spamming loads on every cursor move)
+	currentLogBranch string // last branch we issued a Log load for (Branches panel focused)
+	currentPatchRev  string // last revision we issued a Patch load for (History panel focused)
+
+	// mainContentSource is which of Files/Branches/History last populated
+	// the shared main panel, so mainPanelTitle() knows what's actually
+	// showing there even once focus moves onto the main panel itself
+	// (focusDiff), where m.focus alone no longer says which kind of content
+	// (diff/log/patch) is currently loaded.
+	mainContentSource focusPanel
 
 	focus                focusPanel
 	prompt               promptKind
@@ -268,9 +277,6 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				if relY >= 0 && relY < effFilesH {
 					if target, ok := rowClickTarget(m.files.Paginator.Page, rowsPerPage(effFilesH), m.files.VisibleItems(), relY); ok {
 						m.files.Select(target)
-						if dcmd := (&m).ensureDiffForSelectedFile(); dcmd != nil {
-							cmd = dcmd
-						}
 					}
 				}
 			}
@@ -285,7 +291,8 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				} else {
 					m.showRemoteBranches = false
 				}
-				return m, m.refreshBranchesList()
+				cmd = m.refreshBranchesList()
+				break
 			}
 			if y >= branchesBoxTop+1 && y < branchesBoxTop+branchesH-1 {
 				relY := y - (branchesBoxTop + 1)
@@ -328,6 +335,10 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.focus = newFocus
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
+	}
+
+	if mcmd := (&m).ensureMainContent(); mcmd != nil {
+		cmd = tea.Batch(cmd, mcmd)
 	}
 
 	return m, cmd
@@ -483,6 +494,29 @@ func (m *Model) recomputePanelHeights() {
 	m.diffHeight = max(0, diffOuter-borderHeight)
 }
 
+// mainPanelTitle returns the shared main panel's title for whatever's
+// currently focused, matching lazygit's contextual main view (checked
+// against pkg/gui/controllers/files_controller.go's renderWorkingTreeDiff,
+// branches_controller.go's LogTitle, and local_commits_controller.go's
+// hardcoded "Patch"): Files shows "Unstaged changes"/"Staged changes" for
+// the selected file, Branches shows "Log", History shows "Patch".
+func (m Model) mainPanelTitle() string {
+	switch m.mainContentSource {
+	case focusBranches:
+		return "Log"
+	case focusHistory:
+		return "Patch"
+	default:
+		if item, ok := m.files.SelectedItem().(fileItem); ok && !item.isDir {
+			if item.staged {
+				return "Staged changes"
+			}
+			return "Unstaged changes"
+		}
+		return "Diff"
+	}
+}
+
 // refreshBranchesList rebuilds the Branches list from local/remote state and
 // returns SetItems' cmd (non-nil when the panel has an active filter, so it
 // must be propagated back through Update rather than dropped - otherwise a
@@ -517,24 +551,48 @@ func (m Model) currentFooter() string {
 	}
 }
 
-// ensureDiffForSelectedFile returns commands to load (and show status for)
-// the diff of the currently selected *file* (not directory) in the Files
-// panel. It skips if we're not focused on Files, the selection is a dir,
-// or we've already loaded the diff for that exact path (prevents a
-// "Loading diff..." flash on every arrow key).
-func (m *Model) ensureDiffForSelectedFile() tea.Cmd {
-	if m.focus != focusFiles {
-		return nil
+// ensureMainContent returns a command to (re)load the shared main panel's
+// content for whatever is currently focused/selected, matching lazygit's
+// own contextual main view: Files shows the selected file's diff, Branches
+// shows the selected branch's Log, History shows the selected revision's
+// Patch. Skips when the relevant selection hasn't actually changed (avoids
+// a load/flash on every cursor move that lands on the same target), and
+// when the focused panel has no meaningful content selected (a directory
+// in Files, an empty list).
+func (m *Model) ensureMainContent() tea.Cmd {
+	if m.focus != focusDiff {
+		m.mainContentSource = m.focus
 	}
-	item, ok := m.files.SelectedItem().(fileItem)
-	if !ok || item.isDir {
-		return nil
+	switch m.focus {
+	case focusFiles:
+		item, ok := m.files.SelectedItem().(fileItem)
+		if !ok || item.isDir || item.change.Path == m.currentDiffPath {
+			return nil
+		}
+		m.currentDiffPath = item.change.Path
+		return loadDiffCmd(m.runner, item.change.Path)
+
+	case focusBranches:
+		item, ok := m.branches.SelectedItem().(branchItem)
+		if !ok || item.branch.Name == m.currentLogBranch {
+			return nil
+		}
+		m.currentLogBranch = item.branch.Name
+		return loadBranchLogCmd(m.runner, item.branch.Name)
+
+	case focusHistory:
+		item, ok := m.history.SelectedItem().(revisionItem)
+		if !ok || item.revision.Hash == m.currentPatchRev {
+			return nil
+		}
+		m.currentPatchRev = item.revision.Hash
+		parent := item.revision.Parent
+		if lore.IsZeroHash(parent) {
+			parent = ""
+		}
+		return loadRevisionPatchCmd(m.runner, parent, item.revision.Hash)
 	}
-	if item.change.Path == m.currentDiffPath {
-		return nil
-	}
-	m.currentDiffPath = item.change.Path
-	return loadDiffCmd(m.runner, item.change.Path)
+	return nil
 }
 
 // changedPaths flattens a Status's staged and unstaged entries into a single
@@ -606,7 +664,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filesTotal = len(items)
 		m.files.SetShowStatusBar(false)
 		m.files.SetShowPagination(false)
-		diffCmd := m.ensureDiffForSelectedFile()
+		diffCmd := (&m).ensureMainContent()
 		lockCmd := loadLocksCmd(m.runner, changedPaths(msg.status))
 		return m, tea.Batch(setCmd, diffCmd, lockCmd)
 
@@ -631,7 +689,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			bs = m.remoteBranches
 		}
 		m.branchesTotal = len(bs)
-		return m, cmd
+		return m, tea.Batch(cmd, (&m).ensureMainContent())
 
 	case historyMsg:
 		m.appStatus = ""
@@ -644,7 +702,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyTotal = len(items)
 		m.history.SetShowStatusBar(false)
 		m.history.SetShowPagination(false)
-		return m, cmd
+		return m, tea.Batch(cmd, (&m).ensureMainContent())
 
 	case locksMsg:
 		// Best-effort: locks require an online remote (see internal/lore/lock.go),
@@ -669,7 +727,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		m.diff.SetContent(msg.text)
+		m.err = nil
+		if msg.raw {
+			m.diff.SetContentRaw(msg.text)
+		} else {
+			m.diff.SetContent(msg.text)
+		}
 		return m, nil
 
 	case actionDoneMsg:

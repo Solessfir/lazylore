@@ -22,6 +22,49 @@ func runBatch(cmd tea.Cmd) {
 	}
 }
 
+func TestModel_JumpToBranchesLoadsLogForSelectedBranch(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json history 50 --branch main": {ExitCode: 0, Stdout: `{"tagName":"revisionHistoryEntry","data":{"revision":"abc123","revisionNumber":1,"parent":["0000000000000000000000000000000000000000000000000000000000000000","0000000000000000000000000000000000000000000000000000000000000000"]}}
+{"tagName":"metadata","data":{"key":"message","value":{"tagName":"string","data":"initial"}}}
+` + jsonCompleteSuccess,
+		},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(branchesMsg{branches: []lore.Branch{{Name: "main", Current: true}}})
+	m2 := updated.(Model)
+
+	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd after jumping to Branches")
+	}
+	msg := cmd()
+	dm, ok := msg.(diffMsg)
+	if !ok || !dm.raw {
+		t.Fatalf("msg = %#v, want a raw diffMsg (Log content)", msg)
+	}
+	if len(fake.Calls) != 1 || fake.Calls[0][4] != "main" {
+		t.Fatalf("Calls = %+v, want a single history --branch main call", fake.Calls)
+	}
+}
+
+func TestModel_JumpToHistoryLoadsPatchForSelectedRevision(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json diff --source parenthash --target abc123": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{{Number: 1, Hash: "abc123", Parent: "parenthash", Message: "first"}}})
+	m2 := updated.(Model)
+
+	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd after jumping to History")
+	}
+	msg := cmd()
+	if dm, ok := msg.(diffMsg); !ok || dm.raw {
+		t.Fatalf("msg = %#v, want a non-raw diffMsg (Patch content, diff-colored)", msg)
+	}
+}
+
 func TestModel_SpaceOnBranchesChecksOutSelectedBranch(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json branch switch dev": {ExitCode: 0, Stdout: jsonCompleteSuccess},

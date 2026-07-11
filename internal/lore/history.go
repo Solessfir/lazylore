@@ -12,13 +12,30 @@ type Revision struct {
 	Message string
 	Hash    string
 	Author  string
+	Parent  string // direct parent's hash; zero-filled hash string when this is the root revision
 }
 
 // revisionHistoryEntryData mirrors LoreRevisionHistoryEntryEventData
-// (lore-revision/src/revision/history.rs) - only the field Revision uses.
+// (lore-revision/src/revision/history.rs). Parent is [direct_parent,
+// merge_other_parent] - only the direct parent (index 0) is used here.
 type revisionHistoryEntryData struct {
-	RevisionNumber int    `json:"revisionNumber"`
-	Revision       string `json:"revision"`
+	RevisionNumber int       `json:"revisionNumber"`
+	Revision       string    `json:"revision"`
+	Parent         [2]string `json:"parent"`
+}
+
+// IsZeroHash reports whether h is lore's all-zero sentinel hash (used e.g.
+// for "no parent"/"no revision"), without hardcoding its exact length.
+func IsZeroHash(h string) bool {
+	if h == "" {
+		return true
+	}
+	for _, r := range h {
+		if r != '0' {
+			return false
+		}
+	}
+	return true
 }
 
 // metadataEventData mirrors LoreMetadataEventData (lore-revision/src/event.rs):
@@ -62,7 +79,7 @@ func ParseHistory(output string) ([]Revision, error) {
 			if err := json.Unmarshal(e.Data, &data); err != nil {
 				return nil, fmt.Errorf("parsing revisionHistoryEntry event: %w", err)
 			}
-			current = &Revision{Number: data.RevisionNumber, Hash: data.Revision}
+			current = &Revision{Number: data.RevisionNumber, Hash: data.Revision, Parent: data.Parent[0]}
 
 		case "metadata":
 			if current == nil {

@@ -11,6 +11,122 @@ import (
 	"lazylore/internal/lore"
 )
 
+func TestModel_MainPanelTitle_MatchesLazygitPerContext(t *testing.T) {
+	// Ground truth: files_controller.go's renderWorkingTreeDiff (Unstaged/
+	// Staged changes), branches_controller.go's LogTitle ("Log"),
+	// local_commits_controller.go's hardcoded "Patch".
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+	if got := m2.mainPanelTitle(); got != "Unstaged changes" {
+		t.Fatalf("mainPanelTitle() (unstaged file selected) = %q, want %q", got, "Unstaged changes")
+	}
+
+	updated, _ = m2.Update(statusMsg{status: lore.Status{Staged: []lore.FileChange{{Status: 'A', Path: "b.txt"}}}})
+	m3 := updated.(Model)
+	if got := m3.mainPanelTitle(); got != "Staged changes" {
+		t.Fatalf("mainPanelTitle() (staged file selected) = %q, want %q", got, "Staged changes")
+	}
+
+	m3.focus = focusBranches
+	(&m3).ensureMainContent() // real usage always pairs a focus change with this, see keys.go
+	if got := m3.mainPanelTitle(); got != "Log" {
+		t.Fatalf("mainPanelTitle() (Branches focused) = %q, want %q", got, "Log")
+	}
+
+	m3.focus = focusHistory
+	(&m3).ensureMainContent()
+	if got := m3.mainPanelTitle(); got != "Patch" {
+		t.Fatalf("mainPanelTitle() (History focused) = %q, want %q", got, "Patch")
+	}
+}
+
+func TestModel_MainPanelTitle_PersistsSourceWhenDiffPanelItselfFocused(t *testing.T) {
+	// Regression: tabbing into the Diff panel itself must keep showing
+	// whichever panel's content (Log/Patch/diff) is actually loaded, not
+	// fall back to reading the Files selection just because m.focus is no
+	// longer Files/Branches/History.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.focus = focusBranches
+	(&m).ensureMainContent()
+	m.focus = focusDiff
+	if got := m.mainPanelTitle(); got != "Log" {
+		t.Fatalf("mainPanelTitle() after tabbing from Branches into Diff = %q, want %q", got, "Log")
+	}
+}
+
+func TestModel_EnsureMainContent_LoadsBranchLogOnce(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json history 50 --branch dev": {ExitCode: 0, Stdout: `{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}` + "\n"},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(branchesMsg{branches: []lore.Branch{{Name: "main", Current: true}, {Name: "dev"}}})
+	m2 := updated.(Model)
+	m2.focus = focusBranches
+	m2.branches.Select(1) // "dev"
+
+	cmd := (&m2).ensureMainContent()
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd for the first Log load")
+	}
+	msg := cmd()
+	dm, ok := msg.(diffMsg)
+	if !ok || !dm.raw {
+		t.Fatalf("msg = %#v, want a raw diffMsg (Log content, not diff-colored)", msg)
+	}
+
+	// Calling again for the same selection must not re-issue the load.
+	if cmd := (&m2).ensureMainContent(); cmd != nil {
+		t.Fatalf("expected nil Cmd on the second call for the same branch, got %v", cmd)
+	}
+}
+
+func TestModel_EnsureMainContent_LoadsRevisionPatchWithParent(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json diff --source parenthash --target abc123": {ExitCode: 0, Stdout: `{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}` + "\n"},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{{Number: 2, Hash: "abc123", Parent: "parenthash", Message: "second"}}})
+	m2 := updated.(Model)
+	m2.focus = focusHistory
+
+	cmd := (&m2).ensureMainContent()
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd for the Patch load")
+	}
+	msg := cmd()
+	if dm, ok := msg.(diffMsg); !ok || dm.raw {
+		t.Fatalf("msg = %#v, want a non-raw diffMsg (real diff/patch text, should be diff-colored)", msg)
+	}
+	if len(fake.Calls) != 1 || fake.Calls[0][2] != "--source" || fake.Calls[0][3] != "parenthash" {
+		t.Fatalf("Calls = %+v, want a single diff --source parenthash --target abc123 call", fake.Calls)
+	}
+}
+
+func TestModel_EnsureMainContent_RootRevisionSkipsDiffCall(t *testing.T) {
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{
+		{Number: 1, Hash: "root123", Parent: "0000000000000000000000000000000000000000000000000000000000000000", Message: "initial"},
+	}})
+	m2 := updated.(Model)
+	m2.focus = focusHistory
+
+	cmd := (&m2).ensureMainContent()
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd (the 'no parent' message), even though no runner call is made")
+	}
+	msg := cmd()
+	dm, ok := msg.(diffMsg)
+	if !ok || !dm.raw || !strings.Contains(dm.text, "Initial revision") {
+		t.Fatalf("msg = %#v, want a raw diffMsg explaining there's no parent to diff against", msg)
+	}
+	if len(fake.Calls) != 0 {
+		t.Fatalf("Calls = %+v, want no runner calls for the root revision", fake.Calls)
+	}
+}
+
 func TestRowsPerPage_ReservesOneRowForBubblesFilterInput(t *testing.T) {
 	// bubbles/list always reserves one row for a potential filter input
 	// (tied to filteringEnabled, independent of ShowTitle), so real per-page

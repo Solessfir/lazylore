@@ -46,32 +46,32 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focus = (m.focus + 1) % 4
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
-		return m, nil
+		return m, (&m).ensureMainContent()
 
 	case "shift+tab", "h":
 		m.focus = (m.focus + 3) % 4
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
-		return m, nil
+		return m, (&m).ensureMainContent()
 
 	// Panel jump keys like lazygit (1/2=Files (under Status), 3=Branches, 4=History, 5=Diff)
 	case "1":
 		m.focus = focusFiles
 		m.syncFocusDelegates()
-		return m, nil
+		return m, (&m).ensureMainContent()
 	case "2":
 		m.focus = focusFiles
 		m.syncFocusDelegates()
-		return m, nil
+		return m, (&m).ensureMainContent()
 	case "3":
 		m.focus = focusBranches
 		m.syncFocusDelegates()
-		return m, nil
+		return m, (&m).ensureMainContent()
 	case "4":
 		m.focus = focusHistory
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
-		return m, nil
+		return m, (&m).ensureMainContent()
 	case "5":
 		m.focus = focusDiff
 		m.syncFocusDelegates()
@@ -224,15 +224,15 @@ func (m Model) updateFocusedList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.focus {
 	case focusFiles:
 		m.files, cmd = m.files.Update(msg)
-		if dcmd := (&m).ensureDiffForSelectedFile(); dcmd != nil {
-			cmd = tea.Batch(cmd, dcmd)
-		}
 	case focusBranches:
 		m.branches, cmd = m.branches.Update(msg)
 	case focusHistory:
 		m.history, cmd = m.history.Update(msg)
 	case focusDiff:
 		m.diff.vp, cmd = m.diff.vp.Update(msg)
+	}
+	if mcmd := (&m).ensureMainContent(); mcmd != nil {
+		cmd = tea.Batch(cmd, mcmd)
 	}
 	return m, cmd
 }

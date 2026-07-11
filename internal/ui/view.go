@@ -182,7 +182,7 @@ func (m Model) View() string {
 	// Right column: Diff on top, Command Log directly below it (matching lazygit
 	// "extras" panel placement under the main content, not spanning full width).
 	diffW := m.diff.vp.Width + 1
-	diffPanel := renderTitledPanel(m.focus == focusDiff, diffW, effDiffH, "5", "Diff", m.diff.viewWithScrollbar())
+	diffPanel := renderTitledPanel(m.focus == focusDiff, diffW, effDiffH, "5", m.mainPanelTitle(), m.diff.viewWithScrollbar())
 
 	logInnerH := max(0, commandLogPanelHeight-borderHeight)
 	logContent := m.log.LastLines(logInnerH)

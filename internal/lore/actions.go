@@ -65,6 +65,21 @@ func History(r Runner, length int) ([]Revision, error) {
 	return ParseHistory(res.Stdout)
 }
 
+// HistoryForBranch is History scoped to branch (`lore history --branch`),
+// for the Branches panel's "Log" view.
+func HistoryForBranch(r Runner, branch string, length int) ([]Revision, error) {
+	args := []string{"history"}
+	if length > 0 {
+		args = append(args, strconv.Itoa(length))
+	}
+	args = append(args, "--branch", branch)
+	res, err := runChecked(r, args...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseHistory(res.Stdout)
+}
+
 // fileDiffData mirrors the fileDiff event's data: `patch` is the same
 // unified-diff text `lore diff` prints without --json, just delivered
 // through a JSON envelope instead of raw stdout mixed with pager/log noise.
@@ -73,26 +88,57 @@ type fileDiffData struct {
 	Patch string `json:"patch"`
 }
 
-func Diff(r Runner, path string) (string, error) {
-	res, err := runChecked(r, "diff", path)
+// parseFileDiffPatches collects every fileDiff event's patch text, in order.
+func parseFileDiffPatches(output string) ([]string, error) {
+	events, err := parseEvents(output)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	events, err := parseEvents(res.Stdout)
-	if err != nil {
-		return "", fmt.Errorf("lore diff %s: %w", path, err)
-	}
+	var patches []string
 	for _, e := range events {
 		if e.TagName != "fileDiff" {
 			continue
 		}
 		var data fileDiffData
 		if err := json.Unmarshal(e.Data, &data); err != nil {
-			return "", fmt.Errorf("parsing fileDiff event: %w", err)
+			return nil, fmt.Errorf("parsing fileDiff event: %w", err)
 		}
-		return data.Patch, nil
+		patches = append(patches, data.Patch)
 	}
-	return "", nil // no fileDiff event: nothing changed
+	return patches, nil
+}
+
+func Diff(r Runner, path string) (string, error) {
+	res, err := runChecked(r, "diff", path)
+	if err != nil {
+		return "", err
+	}
+	patches, err := parseFileDiffPatches(res.Stdout)
+	if err != nil {
+		return "", fmt.Errorf("lore diff %s: %w", path, err)
+	}
+	if len(patches) == 0 {
+		return "", nil // no fileDiff event: nothing changed
+	}
+	return patches[0], nil
+}
+
+// DiffRevision returns the combined patch for every file that changed
+// between source and target (e.g. a commit's parent and the commit itself)
+// - lore's equivalent of `git show <commit>`. Confirmed `lore diff` accepts
+// --source/--target with no path restriction to diff every changed file
+// (lore-cli-commands.md: "--source ... by default the current revision",
+// "--target ... by default the current file system state").
+func DiffRevision(r Runner, source, target string) (string, error) {
+	res, err := runChecked(r, "diff", "--source", source, "--target", target)
+	if err != nil {
+		return "", err
+	}
+	patches, err := parseFileDiffPatches(res.Stdout)
+	if err != nil {
+		return "", fmt.Errorf("lore diff --source %s --target %s: %w", source, target, err)
+	}
+	return strings.Join(patches, ""), nil
 }
 
 func Stage(r Runner, paths ...string) (Result, error) {

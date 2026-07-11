@@ -10,6 +10,54 @@ import (
 	"lazylore/internal/lore"
 )
 
+func TestModel_ViewShowsContextualMainPanelTitle(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 155, Height: 40})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m3 := updated.(Model)
+
+	if v := m3.View(); !strings.Contains(v, "Unstaged changes") {
+		t.Fatalf("View() with Files focused on an unstaged file must show 'Unstaged changes'; got:\n%s", v)
+	}
+
+	updated, _ = m3.Update(branchesMsg{branches: []lore.Branch{{Name: "main", Current: true}}})
+	m4 := updated.(Model)
+	updated, _ = m4.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	m5 := updated.(Model)
+	if v := m5.View(); !strings.Contains(v, "Log") {
+		t.Fatalf("View() with Branches focused must show 'Log'; got:\n%s", v)
+	}
+
+	updated, _ = m5.Update(historyMsg{revisions: []lore.Revision{{Number: 1, Hash: "abc"}}})
+	m6 := updated.(Model)
+	updated, _ = m6.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	m7 := updated.(Model)
+	if v := m7.View(); !strings.Contains(v, "Patch") {
+		t.Fatalf("View() with History focused must show 'Patch'; got:\n%s", v)
+	}
+}
+
+func TestFormatBranchLog_RendersOneLinePerRevision(t *testing.T) {
+	revisions := []lore.Revision{
+		{Hash: "abcdef1234567890", Author: "dev@example.com", Message: "second"},
+		{Hash: "0123456789abcdef", Message: "first"}, // no author
+	}
+	got := formatBranchLog(revisions)
+	if !strings.Contains(got, "second") || !strings.Contains(got, "first") {
+		t.Fatalf("formatBranchLog missing a message: %q", got)
+	}
+	if !strings.Contains(got, "dev@example.com") || !strings.Contains(got, "unknown") {
+		t.Fatalf("formatBranchLog missing an author (real or 'unknown' fallback): %q", got)
+	}
+}
+
+func TestFormatBranchLog_EmptyList(t *testing.T) {
+	if got := formatBranchLog(nil); got != "No revisions." {
+		t.Fatalf("formatBranchLog(nil) = %q, want %q", got, "No revisions.")
+	}
+}
+
 func TestAheadBehindArrows_MatchesLazygitsFormat(t *testing.T) {
 	// Ground truth: pkg/gui/presentation/branches.go's BranchStatus -
 	// "↓N↑N" both, "↓N" behind only, "↑N" ahead only, "" in sync.

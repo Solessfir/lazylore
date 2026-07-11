@@ -30,8 +30,8 @@ func TestParseHistory_TwoRevisions(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []lore.Revision{
-		{Number: 2, Message: "Second revision on branch", Hash: "45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2", Author: "dev@example.com"},
-		{Number: 1, Message: "Initial revision", Hash: "b3e648f10d02c6162433bfdb49c06012027d19bc586560647d0bf2ff6278c195", Author: ""},
+		{Number: 2, Message: "Second revision on branch", Hash: "45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2", Author: "dev@example.com", Parent: "b3e648f10d02c6162433bfdb49c06012027d19bc586560647d0bf2ff6278c195"},
+		{Number: 1, Message: "Initial revision", Hash: "b3e648f10d02c6162433bfdb49c06012027d19bc586560647d0bf2ff6278c195", Author: "", Parent: "0000000000000000000000000000000000000000000000000000000000000000"},
 	}
 	if len(revisions) != len(want) {
 		t.Fatalf("revisions = %+v, want %+v", revisions, want)

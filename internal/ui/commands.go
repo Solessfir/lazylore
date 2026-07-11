@@ -39,6 +39,34 @@ func loadDiffCmd(r lore.Runner, path string) tea.Cmd {
 	}
 }
 
+// loadBranchLogCmd fills the main panel with branch's revision log, for
+// when the Branches panel is focused (lazygit's "Log" main view).
+func loadBranchLogCmd(r lore.Runner, branch string) tea.Cmd {
+	return func() tea.Msg {
+		revisions, err := lore.HistoryForBranch(r, branch, 50)
+		if err != nil {
+			return diffMsg{err: err}
+		}
+		return diffMsg{text: formatBranchLog(revisions), raw: true}
+	}
+}
+
+// loadRevisionPatchCmd fills the main panel with the selected revision's
+// full patch, for when the History panel is focused (lazygit's "Patch"
+// main view). Callers pass parent == "" for the root revision (lore.
+// IsZeroHash) - it has no parent to diff against, which lore diff --source
+// can't target, so this skips the call rather than guess at a comparison
+// lore doesn't expose.
+func loadRevisionPatchCmd(r lore.Runner, parent, revision string) tea.Cmd {
+	return func() tea.Msg {
+		if parent == "" {
+			return diffMsg{text: "Initial revision - no parent to diff against.", raw: true}
+		}
+		text, err := lore.DiffRevision(r, parent, revision)
+		return diffMsg{text: text, err: err}
+	}
+}
+
 func loadLocksCmd(r lore.Runner, paths []string) tea.Cmd {
 	return func() tea.Msg {
 		locks, err := lore.LockStatus(r, paths...)

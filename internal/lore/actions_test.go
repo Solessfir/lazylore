@@ -2,6 +2,7 @@ package lore_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"lazylore/internal/lore"
@@ -63,6 +64,38 @@ func TestHistory_BuildsLengthArg(t *testing.T) {
 	}
 	if len(revisions) != 2 {
 		t.Fatalf("revisions = %+v, want 2 entries", revisions)
+	}
+}
+
+func TestHistoryForBranch_BuildsArgs(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json history 10 --branch dev": {ExitCode: 0, Stdout: historyTwoRevisionsOutput},
+	}}
+	revisions, err := lore.HistoryForBranch(fake, "dev", 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(revisions) != 2 {
+		t.Fatalf("revisions = %+v, want 2 entries", revisions)
+	}
+}
+
+func TestDiffRevision_ConcatenatesEveryFileDiffPatch(t *testing.T) {
+	// Two files changed between source and target - both fileDiff events
+	// must be concatenated into the combined "patch" (lore's equivalent of
+	// `git show <commit>`, which lists every changed file in one output).
+	out := `{"tagName":"fileDiff","data":{"path":"a.txt","patch":"--- a.txt@1\n+++ a.txt@2\n@@ -1 +1 @@\n-old\n+new\n","action":"keep"}}
+{"tagName":"fileDiff","data":{"path":"b.txt","patch":"--- /dev/null\n+++ b.txt\n@@ -0,0 +1 @@\n+added\n","action":"add"}}
+` + jsonCompleteSuccess
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json diff --source parenthash --target commithash": {ExitCode: 0, Stdout: out},
+	}}
+	patch, err := lore.DiffRevision(fake, "parenthash", "commithash")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(patch, "a.txt") || !strings.Contains(patch, "b.txt") {
+		t.Fatalf("patch missing one of the two files: %q", patch)
 	}
 }
 
