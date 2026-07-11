@@ -184,12 +184,8 @@ func renderDualTitledPanel(focused bool, width, height int, num, firstName, seco
 // withBottomCount replaces the bottom border line of a rendered panel with one
 // that includes the count (e.g. "6 of 12") right-aligned near the right corner.
 // This lets us show the "1 of N" without costing an extra content row (full
-// items fit, count lives in the border).
-//
-// focused controls the border color/weight of the rebuilt line, matching
-// injectTitle - without it the frame chars here would render in the
-// terminal's default color while the rest of the border stays green/white,
-// leaving every populated panel with a mismatched bottom edge.
+// items fit, count lives in the border). focused sets the rebuilt line's
+// border color/weight, matching injectTitle.
 func withBottomCount(rendered, count string, focused bool) string {
 	if count == "" {
 		return rendered

@@ -36,9 +36,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "v":
-		// Mirrors lazyp4's select mode: bubbletea's mouse capture blocks the
-		// terminal's own click-drag text selection, so drop mouse capture
-		// while the user copies text, and pick it back up on their next key.
+		// Drop mouse capture so the terminal's own click-drag selection works.
 		m.selectMode = true
 		return m, tea.DisableMouse
 

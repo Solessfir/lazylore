@@ -142,9 +142,6 @@ func (m Model) View() string {
 		func() string {
 			v := strings.TrimLeft(m.stashes.View(), "\n\r")
 			if m.stashesTotal == 0 || strings.Contains(strings.ToLower(v), "no items") {
-				// lore has no native stash/shelve (see internal/lore/stash.go) - say
-				// so plainly rather than leaving an unlabeled blank box that reads
-				// as broken.
 				v = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("lore has no stash - use a branch to set work aside")
 			}
 			p := renderTitledPanel(m.focus == focusStash, m.panelWidth, effStashH, "5", "Stash", v)

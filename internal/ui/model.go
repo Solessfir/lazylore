@@ -572,8 +572,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.selectMode {
-			// Any key exits select mode and restores mouse capture (lazyp4's
-			// handleKey does the same as the very first check).
+			// Any key exits select mode and restores mouse capture.
 			m.selectMode = false
 			return m, tea.EnableMouseCellMotion
 		}

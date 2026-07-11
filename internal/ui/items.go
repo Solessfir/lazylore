@@ -291,13 +291,9 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 		contentW--
 	}
 
-	// Special rendering for branches to match lazygit:
-	// Current: {green}*{green}{white}main{white}
-	// No "default branch" checkmark: lore's branchListEntry data has no such
-	// field, and guessing it from the name (e.g. "main"/"master") can both
-	// mislabel a same-named non-default branch and miss the real default
-	// when it's named something else (e.g. "trunk").
-	// Title split (Local/Remotes) handled at panel title level.
+	// Branch rows: current branch shows "* name" in green; others show a
+	// cyan recency prefix ("3d"). Title split (Local/Remotes) handled at
+	// panel title level.
 	if bi, ok := listItem.(branchItem); ok {
 		name := bi.branch.Name
 
