@@ -26,10 +26,34 @@ var (
 	keybindBarStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Height(1).Padding(0)
 )
 
-// keybindBarText is the global keybinding legend pinned to the very
-// bottom of the screen. Kept to keys handleKey/handlePromptKey actually
-// implement - no promising a "?" help overlay or similar that doesn't exist.
-const keybindBarText = "Focus: tab/h/l | Stage: space | Commit: c | Edit: e | Branch: n | Diff: enter | Discard: d | Reset: D | Select/copy: v | Quit: q"
+// bracketedKey wraps a named (non-printable) key in angle brackets, matching
+// lazygit's own key-label convention (docs/keybindings/Keybindings_en.md:
+// "<space>", "<enter>" vs bare "c", "d", "D" for literal characters).
+func bracketedKey(k string) string {
+	switch k {
+	case "space", "enter", "esc", "tab", "shift+tab":
+		return "<" + k + ">"
+	default:
+		return k
+	}
+}
+
+// keybindBarFor returns the keybinding legend for the currently focused
+// panel, pinned to the bottom of the screen. This mirrors lazygit's own
+// bottom option bar (pkg/gui/options_map.go: renderContextOptionsMap),
+// which shows only the current context's "DisplayOnScreen" bindings - not
+// a single static global list. Kept to keys handleKey/handlePromptKey
+// actually implement for that panel.
+func keybindBarFor(focus focusPanel) string {
+	switch focus {
+	case focusFiles:
+		return "Stage: " + bracketedKey("space") + " | Commit: c | Edit: e | Diff: " + bracketedKey("enter") + " | Discard: d | Reset: D"
+	case focusBranches:
+		return "Switch: " + bracketedKey("enter") + " | New: n"
+	default:
+		return ""
+	}
+}
 
 // renderPanel is retained for tests that assert on explicit size behavior.
 // It still puts the title inside as content (legacy path). New code uses
@@ -155,6 +179,7 @@ func (m Model) View() string {
 	right := lipgloss.JoinVertical(lipgloss.Left, diffPanel, logPanel)
 	main := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
+	keybindBarText := keybindBarFor(m.focus)
 	keybindText := keybindBarText
 	if m.selectMode {
 		keybindText = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).

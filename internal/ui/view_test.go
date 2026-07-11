@@ -10,6 +10,61 @@ import (
 	"lazylore/internal/lore"
 )
 
+func TestBracketedKey_WrapsNamedKeysNotLiterals(t *testing.T) {
+	if got := bracketedKey("space"); got != "<space>" {
+		t.Fatalf("bracketedKey(space) = %q, want <space>", got)
+	}
+	if got := bracketedKey("enter"); got != "<enter>" {
+		t.Fatalf("bracketedKey(enter) = %q, want <enter>", got)
+	}
+	if got := bracketedKey("d"); got != "d" {
+		t.Fatalf("bracketedKey(d) = %q, want bare d (no brackets on literal keys)", got)
+	}
+}
+
+func TestKeybindBarFor_FilesMatchesLazygitsDisplayOnScreenSet(t *testing.T) {
+	// Ground truth: pkg/gui/controllers/files_controller.go's DisplayOnScreen:
+	// true bindings, in registration order (Select/space, CommitChanges/c,
+	// Edit/e, Remove/d, ViewResetOptions/D) - Stash dropped since lore has
+	// none, Diff/enter is lazylore's own file-diff-load action.
+	got := keybindBarFor(focusFiles)
+	want := "Stage: <space> | Commit: c | Edit: e | Diff: <enter> | Discard: d | Reset: D"
+	if got != want {
+		t.Fatalf("keybindBarFor(focusFiles) = %q, want %q", got, want)
+	}
+}
+
+func TestKeybindBarFor_HistoryAndDiffHaveNoBoundActionsYet(t *testing.T) {
+	if got := keybindBarFor(focusHistory); got != "" {
+		t.Fatalf("keybindBarFor(focusHistory) = %q, want empty (no History-specific action implemented)", got)
+	}
+	if got := keybindBarFor(focusDiff); got != "" {
+		t.Fatalf("keybindBarFor(focusDiff) = %q, want empty (Diff panel is scroll-only)", got)
+	}
+}
+
+func TestModel_KeybindBarIsContextualNotGlobalNavOrQuit(t *testing.T) {
+	// Regression: the bar used to be one static string always advertising
+	// Focus/Quit/Select-copy alongside file actions, unlike lazygit's own
+	// per-context bottom bar (which never advertises navigation or quit -
+	// see pkg/gui/controllers/global_controller.go's DisplayOnScreen set:
+	// only Cancel and the "?" keybindings menu, neither of which lazylore
+	// implements). Those keys still work; they're just not advertised.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m2 := updated.(Model)
+	v := m2.View()
+
+	if !strings.Contains(v, "Stage: <space>") {
+		t.Fatalf("Files-focused View() must show the Files keybind bar; got:\n%s", v)
+	}
+	for _, unwanted := range []string{"Focus: tab", "Quit: q", "Select/copy"} {
+		if strings.Contains(v, unwanted) {
+			t.Fatalf("View() must not advertise global nav/quit (%q), matching lazygit's own bar; got:\n%s", unwanted, v)
+		}
+	}
+}
+
 func TestRenderPanel_MatchesRequestedSizeRegardlessOfContentLength(t *testing.T) {
 	const width, height = 30, 5
 
