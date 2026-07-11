@@ -144,10 +144,12 @@ func TestKeybindBarFor_BranchesMatchesLazygitsSupportedSubset(t *testing.T) {
 func TestKeybindBarFor_HistoryMatchesLazygitsSupportedSubset(t *testing.T) {
 	// Ground truth: local_commits_controller.go's Commits DisplayOnScreen set
 	// includes Squash/Fixup/Reword/Drop/Edit/Amend, none of which lore
-	// supports (no rebase-style history rewrite) - only Checkout(space, via
-	// `lore sync`) and Reset(g, via `lore branch reset`) carry over.
+	// supports as a true history rewrite (no rebase) - Checkout(space, via
+	// `lore sync`) and Reset(g, via `lore branch reset`) carry over as-is;
+	// Drop(d) carries over as a revert (lore.RevertRevision), the closest
+	// lore equivalent for anything but the tip commit.
 	got := keybindBarFor(focusHistory)
-	want := "Checkout: <space> | Reset: g"
+	want := "Checkout: <space> | Drop: d | Reset: g"
 	if got != want {
 		t.Fatalf("keybindBarFor(focusHistory) = %q, want %q", got, want)
 	}

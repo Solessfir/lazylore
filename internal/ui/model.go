@@ -553,7 +553,7 @@ func (m Model) currentFooter() string {
 		return "Discard changes to " + m.pendingDiscardPath + "? (y/N)"
 	case m.prompt == promptConfirmDiscardAll:
 		return "Discard ALL changes in the working tree? (y/N)"
-	case m.prompt == promptConfirmBranchReset:
+	case m.prompt == promptConfirmBranchReset || m.prompt == promptConfirmRevert:
 		return m.pendingResetLabel + "? (y/N)"
 	case m.prompt != promptNone:
 		return m.input.View()

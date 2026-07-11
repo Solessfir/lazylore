@@ -65,6 +65,74 @@ func TestModel_JumpToHistoryLoadsPatchForSelectedRevision(t *testing.T) {
 	}
 }
 
+func TestModel_DKeyOnHistoryOpensRevertConfirmWithRevisionHash(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.focus = focusHistory
+	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{{Number: 1, Hash: "abcdef1234567890", Message: "oops"}}})
+	m2 := updated.(Model)
+
+	updated, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m3 := updated.(Model)
+	if m3.prompt != promptConfirmRevert {
+		t.Fatalf("prompt = %v, want promptConfirmRevert", m3.prompt)
+	}
+	if m3.pendingResetRevision != "abcdef1234567890" {
+		t.Fatalf("pendingResetRevision = %q, want the full hash", m3.pendingResetRevision)
+	}
+	if cmd != nil {
+		t.Fatalf("expected no Cmd yet (confirmation pending), got %v", cmd)
+	}
+}
+
+func TestModel_YKeyConfirmsRevert(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json revision revert abcdef12": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	m.focus = focusHistory
+	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{{Number: 1, Hash: "abcdef12", Message: "oops"}}})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m3 := updated.(Model)
+
+	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m4 := updated.(Model)
+	if m4.prompt != promptNone {
+		t.Fatalf("prompt after y = %v, want promptNone", m4.prompt)
+	}
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd after confirming revert")
+	}
+	runBatch(cmd)
+	if len(fake.Calls) != 1 || fake.Calls[0][1] != "revision" || fake.Calls[0][2] != "revert" || fake.Calls[0][3] != "abcdef12" {
+		t.Fatalf("Calls = %+v, want a single revision revert call", fake.Calls)
+	}
+}
+
+func TestModel_EscCancelsRevertPromptWithoutRunnerCalls(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json revision revert abcdef12": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	m.focus = focusHistory
+	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{{Number: 1, Hash: "abcdef12", Message: "oops"}}})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m3 := updated.(Model)
+
+	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m4 := updated.(Model)
+	if m4.prompt != promptNone {
+		t.Fatalf("prompt after esc = %v, want promptNone", m4.prompt)
+	}
+	if cmd != nil {
+		t.Fatalf("expected no Cmd after cancelling, got %v", cmd)
+	}
+	if len(fake.Calls) != 0 {
+		t.Fatalf("expected no runner calls after cancelling, got %+v", fake.Calls)
+	}
+}
+
 func TestModel_SpaceOnBranchesChecksOutSelectedBranch(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json branch switch dev": {ExitCode: 0, Stdout: jsonCompleteSuccess},

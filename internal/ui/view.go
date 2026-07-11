@@ -51,7 +51,7 @@ func keybindBarFor(focus focusPanel) string {
 	case focusBranches:
 		return "Checkout: " + bracketedKey("space") + " | New branch: n | Reset: g"
 	case focusHistory:
-		return "Checkout: " + bracketedKey("space") + " | Reset: g"
+		return "Checkout: " + bracketedKey("space") + " | Drop: d | Reset: g"
 	default:
 		return ""
 	}

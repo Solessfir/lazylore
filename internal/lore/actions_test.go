@@ -225,6 +225,29 @@ func TestSyncTo_BuildsArgs(t *testing.T) {
 	}
 }
 
+func TestRevertRevision_BuildsArgs(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json revision revert abc123": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	_, err := lore.RevertRevision(fake, "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRevertRevision_SurfacesConflictAsError(t *testing.T) {
+	// lazylore has no UI for lore's resolve/abort revert sub-flow, so a
+	// conflicting revert must surface as a plain error, not be silently
+	// left in an unresolved state.
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json revision revert abc123": {ExitCode: 1, Stdout: `{"tagName":"complete","data":{"status":-1,"error":{"errorCode":-1,"message":"revert conflict","traceLocations":[]}}}` + "\n"},
+	}}
+	_, err := lore.RevertRevision(fake, "abc123")
+	if err == nil {
+		t.Fatal("expected an error when the revert reports a failure")
+	}
+}
+
 func TestDiscardChanges_ShortCircuitsWhenUnstageFails(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json unstage a.txt": {ExitCode: 1, Stdout: jsonCompleteFailure},

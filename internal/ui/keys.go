@@ -26,6 +26,7 @@ const (
 	promptConfirmDiscard
 	promptConfirmDiscardAll
 	promptConfirmBranchReset
+	promptConfirmRevert
 )
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -131,10 +132,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "d":
-		if m.focus == focusFiles {
+		switch m.focus {
+		case focusFiles:
 			if item, ok := m.files.SelectedItem().(fileItem); ok && !item.isDir {
 				m.prompt = promptConfirmDiscard
 				m.pendingDiscardPath = item.change.Path
+			}
+		case focusHistory:
+			// Drop: lore has no rebase/history-rewrite, so this reverts
+			// (a new revision undoing the change) rather than truly erasing
+			// the commit - see lore.RevertRevision.
+			if item, ok := m.history.SelectedItem().(revisionItem); ok && item.revision.Hash != "" {
+				m.prompt = promptConfirmRevert
+				m.pendingResetRevision = item.revision.Hash
+				m.pendingResetLabel = "Revert revision " + shortHash(item.revision.Hash)
 			}
 		}
 		return m, nil
@@ -272,6 +283,21 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(
 				func() tea.Msg { return setAppStatusMsg("Resetting...") },
 				resetBranchCmd(m.runner, revision, label),
+			)
+		}
+		return m, nil
+	}
+
+	if m.prompt == promptConfirmRevert {
+		m.prompt = promptNone
+		revision := m.pendingResetRevision
+		label := m.pendingResetLabel
+		m.pendingResetRevision = ""
+		m.pendingResetLabel = ""
+		if msg.String() == "y" {
+			return m, tea.Batch(
+				func() tea.Msg { return setAppStatusMsg("Reverting...") },
+				revertCmd(m.runner, revision, label),
 			)
 		}
 		return m, nil

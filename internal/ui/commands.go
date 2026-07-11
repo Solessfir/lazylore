@@ -174,3 +174,10 @@ func syncToCmd(r lore.Runner, revision, label string) tea.Cmd {
 		return actionDoneMsg{label: label, err: err}
 	}
 }
+
+func revertCmd(r lore.Runner, revision, label string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := lore.RevertRevision(r, revision)
+		return actionDoneMsg{label: label, err: err}
+	}
+}

@@ -192,6 +192,16 @@ func SyncTo(r Runner, revision string) (Result, error) {
 	return runChecked(r, "sync", revision)
 }
 
+// RevertRevision undoes revision's changes by committing a new revision on
+// top - lore has no rebase/history-rewrite, so this (not a true "drop") is
+// the closest equivalent to git's drop for anything but the tip commit.
+// Auto-commits when the revert is clean (lore's own default); a conflicting
+// revert surfaces as a runChecked error here rather than dropping into
+// lore's resolve/abort sub-flow, which lazylore has no UI for.
+func RevertRevision(r Runner, revision string) (Result, error) {
+	return runChecked(r, "revision", "revert", revision)
+}
+
 func Commit(r Runner, message string) (Result, error) {
 	return runChecked(r, "commit", message)
 }
