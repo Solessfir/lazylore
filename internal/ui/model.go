@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/paginator"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -145,24 +144,36 @@ func (m *Model) syncFocusDelegates() {
 	m.history.SetShowPagination(false)
 }
 
+// rowsPerPage is bubbles/list's own real per-page item capacity for a panel
+// whose content area is contentH rows tall (fileDelegate/compactTitleDelegate
+// both report Height()=1, Spacing()=0). bubbles/list.Model always reserves
+// one row at the top of its own View() output for a potential filter input
+// (tied to filteringEnabled, independent of ShowTitle - see list.go's
+// updatePagination), which lazylore's border rendering strips and lipgloss
+// re-pads at the bottom instead - so real capacity is contentH-1, not contentH.
+func rowsPerPage(contentH int) int {
+	return max(1, contentH-1)
+}
+
 // rowClickTarget maps a list panel's clicked row (relY, 0-based within the
 // panel's content area) to the absolute item index it corresponds to on the
 // CURRENT page, or ok=false if relY falls on a blank/padding row.
 //
-// bubbles/list.Model always reserves one row at the top of its own View()
-// output for a potential filter input (tied to filteringEnabled, independent
-// of ShowTitle - see list.go's updatePagination), which lazylore's border
-// rendering strips and lipgloss re-pads at the bottom instead. Bounding the
-// click only against the TOTAL item count across all pages (`target <
-// len(vis)`) let a click on that bottom padding row resolve to a real item
-// on a page that isn't even visible, silently flipping Select()'s page and
-// desyncing every click after it from what's actually on screen.
-func rowClickTarget(p paginator.Model, vis []list.Item, relY int) (int, bool) {
-	perPage := p.PerPage
+// perPage must be freshly computed from what's actually on screen (see
+// rowsPerPage), not read from the list's own Paginator.PerPage: View() calls
+// list.Model.SetSize with a footer-shrink-adjusted height on every render,
+// but View() has a value receiver, so that call never persists back to the
+// real model - Paginator.PerPage silently drifts stale (commonly by exactly
+// one row) relative to what's actually rendered. Bounding the click only
+// against the TOTAL item count across all pages (`target < len(vis)`) then
+// let a click on the last real row - or the padding row below it - resolve
+// to a real item on a page that isn't even visible, silently flipping
+// Select()'s page and desyncing every click after it from what's on screen.
+func rowClickTarget(page, perPage int, vis []list.Item, relY int) (int, bool) {
 	if perPage < 1 {
 		perPage = 1
 	}
-	pageStart := p.Page * perPage
+	pageStart := page * perPage
 	itemsOnPage := min(perPage, len(vis)-pageStart)
 	if relY < 0 || relY >= itemsOnPage {
 		return 0, false
@@ -242,7 +253,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if y >= filesBoxTop+1 && y < filesBoxTop+filesH-1 {
 				relY := y - (filesBoxTop + 1)
 				if relY >= 0 && relY < effFilesH {
-					if target, ok := rowClickTarget(m.files.Paginator, m.files.VisibleItems(), relY); ok {
+					if target, ok := rowClickTarget(m.files.Paginator.Page, rowsPerPage(effFilesH), m.files.VisibleItems(), relY); ok {
 						m.files.Select(target)
 						if dcmd := (&m).ensureDiffForSelectedFile(); dcmd != nil {
 							cmd = dcmd
@@ -266,7 +277,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if y >= branchesBoxTop+1 && y < branchesBoxTop+branchesH-1 {
 				relY := y - (branchesBoxTop + 1)
 				if relY >= 0 && relY < effBranchesH {
-					if target, ok := rowClickTarget(m.branches.Paginator, m.branches.VisibleItems(), relY); ok {
+					if target, ok := rowClickTarget(m.branches.Paginator.Page, rowsPerPage(effBranchesH), m.branches.VisibleItems(), relY); ok {
 						m.branches.Select(target)
 					}
 				}
@@ -276,7 +287,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if y >= historyBoxTop+1 && y < historyBoxTop+historyH-1 {
 				relY := y - (historyBoxTop + 1)
 				if relY >= 0 && relY < effHistoryH {
-					if target, ok := rowClickTarget(m.history.Paginator, m.history.VisibleItems(), relY); ok {
+					if target, ok := rowClickTarget(m.history.Paginator.Page, rowsPerPage(effHistoryH), m.history.VisibleItems(), relY); ok {
 						m.history.Select(target)
 					}
 				}

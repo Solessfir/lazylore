@@ -6,52 +6,74 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/paginator"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"lazylore/internal/lore"
 )
 
+func TestRowsPerPage_ReservesOneRowForBubblesFilterInput(t *testing.T) {
+	// bubbles/list always reserves one row for a potential filter input
+	// (tied to filteringEnabled, independent of ShowTitle), so real per-page
+	// capacity is contentH-1, not contentH - see rowsPerPage's doc comment.
+	if got := rowsPerPage(10); got != 9 {
+		t.Fatalf("rowsPerPage(10) = %d, want 9", got)
+	}
+	if got := rowsPerPage(1); got != 1 {
+		t.Fatalf("rowsPerPage(1) = %d, want 1 (floor of 1)", got)
+	}
+}
+
 func TestRowClickTarget_RealItemOnCurrentPage(t *testing.T) {
-	p := paginator.Model{Page: 0, PerPage: 8}
 	vis := make([]list.Item, 10)
-	target, ok := rowClickTarget(p, vis, 2)
+	target, ok := rowClickTarget(0, 8, vis, 2)
 	if !ok || target != 2 {
 		t.Fatalf("target=%d ok=%v, want 2,true", target, ok)
 	}
 }
 
 func TestRowClickTarget_RejectsPaddingRowEvenWhenGloballyInRange(t *testing.T) {
-	// Regression: page 0 has exactly 8 real items (PerPage=8), 10 items total
-	// across 2 pages. Row 8 is blank padding on page 0 (bubbles/list always
-	// reserves a filter-input row that lazylore's border rendering strips
-	// and re-pads at the bottom - see rowClickTarget's doc comment), but
-	// 8 < len(vis)=10 - the old naive `target < len(vis)` bound would wrongly
-	// resolve this to item 8, which lives on page 1 and isn't even visible,
-	// silently flipping Select()'s page and desyncing every click after it.
-	p := paginator.Model{Page: 0, PerPage: 8}
+	// Regression: page 0 has exactly 8 real items (perPage=8), 10 items total
+	// across 2 pages. Row 8 is blank padding on page 0, but 8 < len(vis)=10 -
+	// the old naive `target < len(vis)` bound would wrongly resolve this to
+	// item 8, which lives on page 1 and isn't even visible, silently flipping
+	// Select()'s page and desyncing every click after it.
 	vis := make([]list.Item, 10)
-	_, ok := rowClickTarget(p, vis, 8)
+	_, ok := rowClickTarget(0, 8, vis, 8)
 	if ok {
 		t.Fatal("expected relY=8 (padding row) to be rejected, not resolved to a hidden item")
 	}
 }
 
 func TestRowClickTarget_RejectsRowPastLastRealItemOnPartialPage(t *testing.T) {
-	p := paginator.Model{Page: 0, PerPage: 8}
 	vis := make([]list.Item, 3)
-	_, ok := rowClickTarget(p, vis, 3)
+	_, ok := rowClickTarget(0, 8, vis, 3)
 	if ok {
 		t.Fatal("expected relY=3 (past the 3 real items) to be rejected")
 	}
 }
 
 func TestRowClickTarget_SecondPageOffsetsCorrectly(t *testing.T) {
-	p := paginator.Model{Page: 1, PerPage: 8}
 	vis := make([]list.Item, 10)
-	target, ok := rowClickTarget(p, vis, 1)
+	target, ok := rowClickTarget(1, 8, vis, 1)
 	if !ok || target != 9 {
 		t.Fatalf("target=%d ok=%v, want 9,true (page 1 starts at absolute index 8)", target, ok)
+	}
+}
+
+func TestRowClickTarget_AcceptsLastRealItemEvenWhenPaginatorPerPageWouldBeStale(t *testing.T) {
+	// Regression: View() calls list.Model.SetSize with a footer-shrink-
+	// adjusted (taller) height on every render, but View() has a value
+	// receiver, so that call never persists back to the real model -
+	// Paginator.PerPage silently drifts stale (commonly by exactly one row)
+	// relative to what's actually rendered. handleMouseClick must compute
+	// perPage fresh (via rowsPerPage) from what's actually on screen instead
+	// of trusting the model's own (possibly stale) Paginator.PerPage - this
+	// is why rowClickTarget takes perPage as an explicit argument rather
+	// than reading it off a paginator.Model.
+	vis := make([]list.Item, 9)
+	target, ok := rowClickTarget(0, rowsPerPage(10), vis, 8)
+	if !ok || target != 8 {
+		t.Fatalf("target=%d ok=%v, want 8,true (the 9th and last item, on a 10-row-tall panel)", target, ok)
 	}
 }
 
