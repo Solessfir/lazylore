@@ -4,7 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"lazylore/internal/lore"
 )
 
 func TestRenderPanel_MatchesRequestedSizeRegardlessOfContentLength(t *testing.T) {
@@ -96,5 +99,23 @@ func TestRenderTitledPanel_StatusCompact(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], "Status") {
 		t.Fatalf("status top border must contain 'Status': %q", lines[0])
+	}
+}
+
+func TestModel_StatusTextShowsBranchNotDuplicatedRepoName(t *testing.T) {
+	// Regression: statusText used to render the repo name twice
+	// ("repo(repo) → branch") instead of showing the branch name.
+	m := NewModel(&lore.FakeRunner{}, "myrepo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(statusMsg{status: lore.Status{Branch: "feature-x"}})
+	m3 := updated.(Model)
+
+	v := m3.View()
+	if !strings.Contains(v, "myrepo (feature-x)") {
+		t.Fatalf("View must show 'myrepo (feature-x)'; got:\n%s", v)
+	}
+	if strings.Contains(v, "myrepo(myrepo)") {
+		t.Fatalf("View must not duplicate the repo name; got:\n%s", v)
 	}
 }

@@ -42,6 +42,7 @@ type Model struct {
 	prompt             promptKind
 	input              textinput.Model
 	pendingDiscardPath string
+	selectMode         bool // mouse capture dropped so the terminal can select text (mirrors lazyp4)
 
 	status        lore.Status
 	collapsedDirs map[string]bool // Files-panel tree: which directory paths are closed
@@ -251,8 +252,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				} else {
 					m.showRemoteBranches = false
 				}
-				m.refreshBranchesList()
-				return m, nil
+				return m, m.refreshBranchesList()
 			}
 			if y >= branchesBoxTop+1 && y < branchesBoxTop+branchesH-1 {
 				relY := y - (branchesBoxTop + 1)
@@ -492,16 +492,19 @@ func (m *Model) recomputePanelHeights() {
 	m.diffHeight = max(0, diffOuter-borderHeight)
 }
 
-func (m *Model) refreshBranchesList() {
+// refreshBranchesList rebuilds the Branches list from local/remote state and
+// returns SetItems' cmd (non-nil when the panel has an active filter, so it
+// must be propagated back through Update rather than dropped - otherwise a
+// filtered Branches view goes stale after any refresh).
+func (m *Model) refreshBranchesList() tea.Cmd {
 	bs := m.localBranches
 	if m.showRemoteBranches {
 		bs = m.remoteBranches
 	}
-	if cmd := m.branches.SetItems(branchesToItems(bs)); cmd != nil {
-		// cmds from SetItems are usually nil for simple lists
-	}
+	cmd := m.branches.SetItems(branchesToItems(bs))
 	m.branches.SetShowStatusBar(false)
 	m.branches.SetShowPagination(false)
+	return cmd
 }
 
 func (m Model) currentFooter() string {
@@ -568,6 +571,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouseClick(msg)
 
 	case tea.KeyMsg:
+		if m.selectMode {
+			// Any key exits select mode and restores mouse capture (lazyp4's
+			// handleKey does the same as the very first check).
+			m.selectMode = false
+			return m, tea.EnableMouseCellMotion
+		}
 		if m.prompt != promptNone {
 			return m.handlePromptKey(msg)
 		}
@@ -607,13 +616,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.localBranches = append(m.localBranches, b)
 			}
 		}
-		m.refreshBranchesList()
+		cmd := m.refreshBranchesList()
 		bs := m.localBranches
 		if m.showRemoteBranches {
 			bs = m.remoteBranches
 		}
 		m.branchesTotal = len(bs)
-		return m, nil
+		return m, cmd
 
 	case historyMsg:
 		m.appStatus = ""
@@ -622,13 +631,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		items := historyToItems(msg.revisions)
-		if cmd := m.history.SetItems(items); cmd != nil {
-			return m, cmd
-		}
+		cmd := m.history.SetItems(items)
 		m.historyTotal = len(items)
 		m.history.SetShowStatusBar(false)
 		m.history.SetShowPagination(false)
-		return m, nil
+		return m, cmd
 
 	case stashesMsg:
 		m.appStatus = ""
@@ -637,13 +644,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		items := stashesToItems(msg.stashes)
-		if cmd := m.stashes.SetItems(items); cmd != nil {
-			return m, cmd
-		}
+		cmd := m.stashes.SetItems(items)
 		m.stashesTotal = len(items)
 		m.stashes.SetShowStatusBar(false)
 		m.stashes.SetShowPagination(false)
-		return m, nil
+		return m, cmd
 
 	case diffMsg:
 		m.appStatus = ""

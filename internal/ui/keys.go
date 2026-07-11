@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -28,17 +27,6 @@ const (
 )
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "v":
-		// Visual selection helper: write the exact current screen layout to a
-		// file so it can be copied/pasted to show alignment bugs etc.
-		view := m.View()
-		if err := os.WriteFile("lazylore-layout.txt", []byte(view), 0644); err == nil {
-			m.log.Append("Saved exact layout to lazylore-layout.txt (cat it and copy the broken alignment)")
-		}
-		return m, nil
-	}
-
 	if m.focusedListIsFiltering() {
 		return m.updateFocusedList(msg)
 	}
@@ -46,6 +34,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+
+	case "v":
+		// Mirrors lazyp4's select mode: bubbletea's mouse capture blocks the
+		// terminal's own click-drag text selection, so drop mouse capture
+		// while the user copies text, and pick it back up on their next key.
+		m.selectMode = true
+		return m, tea.DisableMouse
 
 	case "tab", "l":
 		m.focus = (m.focus + 1) % 5

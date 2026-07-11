@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -30,7 +29,7 @@ var (
 // keybindBarText is the global keybinding legend pinned to the very
 // bottom of the screen. Kept to keys handleKey/handlePromptKey actually
 // implement - no promising a "?" help overlay or similar that doesn't exist.
-const keybindBarText = "Focus: tab/h/l | Stage: space | Commit: c | Branch: n | Diff: enter | Discard: d | Visual/copy layout: v | Quit: q"
+const keybindBarText = "Focus: tab/h/l | Stage: space | Commit: c | Branch: n | Diff: enter | Discard: d | Select/copy: v | Quit: q"
 
 // renderPanel is retained for tests that assert on explicit size behavior.
 // It still puts the title inside as content (legacy path). New code uses
@@ -56,7 +55,8 @@ func (m Model) View() string {
 		return "loading..."
 	}
 
-	statusText := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render("✓ ") + m.repoName + "(" + lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(m.repoName) + ") → " + m.status.Branch
+	statusText := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render("✓ ") + m.repoName +
+		" (" + lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(m.status.Branch) + ")"
 
 	footer := m.currentFooter()
 
@@ -117,7 +117,7 @@ func (m Model) View() string {
 			p := renderTitledPanel(m.focus == focusFiles, m.panelWidth, effFilesH, "1", "Files", v)
 			if m.filesTotal > 0 {
 				cur := m.files.Index() + 1
-				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.filesTotal))
+				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.filesTotal), m.focus == focusFiles)
 			}
 			return p
 		}(),
@@ -126,7 +126,7 @@ func (m Model) View() string {
 			p := renderDualTitledPanel(m.focus == focusBranches, m.panelWidth, effBranchesH, "3", "Local branches", "Remotes", !m.showRemoteBranches, v)
 			if m.branchesTotal > 0 {
 				cur := m.branches.Index() + 1
-				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.branchesTotal))
+				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.branchesTotal), m.focus == focusBranches)
 			}
 			return p
 		}(),
@@ -135,21 +135,22 @@ func (m Model) View() string {
 			p := renderTitledPanel(m.focus == focusHistory, m.panelWidth, effHistoryH, "4", "History", v)
 			if m.historyTotal > 0 {
 				cur := m.history.Index() + 1
-				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.historyTotal))
+				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.historyTotal), m.focus == focusHistory)
 			}
 			return p
 		}(),
 		func() string {
 			v := strings.TrimLeft(m.stashes.View(), "\n\r")
-			// lazygit's Stash panel shows no "No items." placeholder when empty
-			// (just the titled border with blank interior).
 			if m.stashesTotal == 0 || strings.Contains(strings.ToLower(v), "no items") {
-				v = ""
+				// lore has no native stash/shelve (see internal/lore/stash.go) - say
+				// so plainly rather than leaving an unlabeled blank box that reads
+				// as broken.
+				v = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("lore has no stash - use a branch to set work aside")
 			}
 			p := renderTitledPanel(m.focus == focusStash, m.panelWidth, effStashH, "5", "Stash", v)
 			if m.stashesTotal > 0 {
 				cur := m.stashes.Index() + 1
-				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.stashesTotal))
+				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.stashesTotal), m.focus == focusStash)
 			}
 			return p
 		}(),
@@ -177,7 +178,10 @@ func (m Model) View() string {
 	main := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
 	keybindText := keybindBarText
-	if m.appStatus != "" {
+	if m.selectMode {
+		keybindText = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).
+			Render("Select mode - highlight text in your terminal, then press any key to restore mouse")
+	} else if m.appStatus != "" {
 		spinners := []string{"/", "-", "\\", "|"}
 		spin := spinners[m.spinner%4]
 		statusPart := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(m.appStatus + " " + spin + " ")
@@ -191,20 +195,4 @@ func (m Model) View() string {
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, main, bottom)
-}
-
-// cleanListContent strips any "X of Y" or "X/Y" count text that bubbles/list
-// might put in the bottom-right (status bar / pagination). We want clean
-// panels with no such text in the corner, to better match lazygit look.
-func cleanListContent(s string) string {
-	lines := strings.Split(s, "\n")
-	if len(lines) == 0 {
-		return s
-	}
-	last := strings.TrimSpace(lines[len(lines)-1])
-	if regexp.MustCompile(`^\d+\s*(of|/)\s*\d+$`).MatchString(last) {
-		lines = lines[:len(lines)-1]
-		return strings.Join(lines, "\n")
-	}
-	return s
 }

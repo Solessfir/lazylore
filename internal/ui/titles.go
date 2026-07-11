@@ -185,7 +185,12 @@ func renderDualTitledPanel(focused bool, width, height int, num, firstName, seco
 // that includes the count (e.g. "6 of 12") right-aligned near the right corner.
 // This lets us show the "1 of N" without costing an extra content row (full
 // items fit, count lives in the border).
-func withBottomCount(rendered, count string) string {
+//
+// focused controls the border color/weight of the rebuilt line, matching
+// injectTitle - without it the frame chars here would render in the
+// terminal's default color while the rest of the border stays green/white,
+// leaving every populated panel with a mismatched bottom edge.
+func withBottomCount(rendered, count string, focused bool) string {
 	if count == "" {
 		return rendered
 	}
@@ -198,6 +203,16 @@ func withBottomCount(rendered, count string) string {
 	if w < 4 {
 		return rendered
 	}
+
+	frameCol := borderUnfocused
+	if focused {
+		frameCol = borderFocused
+	}
+	frameStyle := lipgloss.NewStyle().Foreground(frameCol)
+	if focused {
+		frameStyle = frameStyle.Bold(true)
+	}
+
 	countW := lipgloss.Width(count)
 	// Right-align count in the bottom border, with one extra `-` padding
 	// immediately to the left of the count (so count doesn't touch the preceding dashes):
@@ -207,19 +222,19 @@ func withBottomCount(rendered, count string) string {
 	if leftDashesLen < 0 {
 		leftDashesLen = 0
 	}
-	leftD := strings.Repeat("─", leftDashesLen)
-	bottom := "╰" + leftD + "─" + count + "╯"
+	build := func(dashes int) string {
+		return frameStyle.Render("╰"+strings.Repeat("─", dashes)+"─") + frameStyle.Render(count) + frameStyle.Render("╯")
+	}
+	bottom := build(leftDashesLen)
 	// If too short (shouldn't happen), pad on right before ╯
 	for lipgloss.Width(bottom) < w {
 		leftDashesLen++
-		leftD = strings.Repeat("─", leftDashesLen)
-		bottom = "╰" + leftD + "─" + count + "╯"
+		bottom = build(leftDashesLen)
 	}
 	// If over, trim dashes
 	for lipgloss.Width(bottom) > w && leftDashesLen > 0 {
 		leftDashesLen--
-		leftD = strings.Repeat("─", leftDashesLen)
-		bottom = "╰" + leftD + "─" + count + "╯"
+		bottom = build(leftDashesLen)
 	}
 	lines[len(lines)-1] = bottom
 	return strings.Join(lines, "\n")

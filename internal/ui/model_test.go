@@ -160,6 +160,55 @@ func TestModel_ActionDoneMsgAppendsToCommandLogAndRefreshes(t *testing.T) {
 	}
 }
 
+func TestModel_HistoryMsgUpdatesTotalEvenWhileFiltering(t *testing.T) {
+	// Regression: historyMsg used to return early (skipping historyTotal and
+	// chrome bookkeeping) whenever list.SetItems returned a non-nil cmd,
+	// which only happens while the panel has an active filter.
+	m := NewModel(&lore.FakeRunner{}, "test-repo")
+	m.focus = focusHistory
+	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{{Number: 1, Message: "first"}}})
+	m2 := updated.(Model)
+
+	var filterCmd tea.Cmd
+	m2.history, filterCmd = m2.history.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	_ = filterCmd
+	if !m2.history.SettingFilter() {
+		t.Fatal("expected history list to be in filter-typing state after \"/\"")
+	}
+
+	updated, _ = m2.Update(historyMsg{revisions: []lore.Revision{
+		{Number: 1, Message: "first"},
+		{Number: 2, Message: "second"},
+		{Number: 3, Message: "third"},
+	}})
+	m3 := updated.(Model)
+	if m3.historyTotal != 3 {
+		t.Fatalf("historyTotal = %d, want 3 (must update even while filtering)", m3.historyTotal)
+	}
+}
+
+func TestModel_RefreshBranchesListPropagatesFilterCmd(t *testing.T) {
+	// Regression: refreshBranchesList silently dropped the cmd SetItems
+	// returns while the Branches panel has an active filter, so a filtered
+	// view never got reconciled after a refresh.
+	m := NewModel(&lore.FakeRunner{}, "test-repo")
+	updated, _ := m.Update(branchesMsg{branches: []lore.Branch{{Name: "main", Current: true}, {Name: "dev"}}})
+	m2 := updated.(Model)
+	m2.focus = focusBranches
+
+	var filterCmd tea.Cmd
+	m2.branches, filterCmd = m2.branches.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	_ = filterCmd
+	if !m2.branches.SettingFilter() {
+		t.Fatal("expected branches list to be in filter-typing state after \"/\"")
+	}
+
+	_, cmd := m2.Update(branchesMsg{branches: []lore.Branch{{Name: "main", Current: true}, {Name: "dev"}}})
+	if cmd == nil {
+		t.Fatal("expected refreshBranchesList's SetItems cmd to be propagated while filtering, got nil")
+	}
+}
+
 func TestModel_StashPanelRendersBelowHistory(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo")
 	// Provide size so resize and View produce panels.
@@ -211,6 +260,12 @@ func TestModel_StashPanelRendersBelowHistory(t *testing.T) {
 		stashSection := v[stashTitleIdx:]
 		if strings.Contains(strings.ToLower(stashSection), "no items") {
 			t.Fatalf("Stash panel must not contain 'No items.' text (matches lazygit); got section:\n%s", stashSection[:min(len(stashSection), 300)])
+		}
+		// Regression: an empty Stash panel used to render as a totally blank,
+		// unlabeled box, indistinguishable from broken. It must say plainly
+		// that lore has no native stash.
+		if !strings.Contains(stashSection, "lore has no stash") {
+			t.Fatalf("empty Stash panel must explain lore has no native stash; got section:\n%s", stashSection[:min(len(stashSection), 300)])
 		}
 	}
 }

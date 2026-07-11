@@ -205,13 +205,10 @@ func branchRecency(b lore.Branch) string {
 	if b.Created == 0 {
 		return "  "
 	}
-	// created can be ms or seconds; normalize
-	var t time.Time
-	if b.Created > 1e12 { // ms
-		t = time.Unix(0, b.Created*int64(time.Millisecond))
-	} else {
-		t = time.Unix(b.Created, 0)
-	}
+	// created is always epoch milliseconds (verified against lore's own
+	// formatting: lore-client/src/cli/commands/branch.rs uses
+	// DateTime::from_timestamp_millis on this same field).
+	t := time.UnixMilli(b.Created)
 	age := time.Since(t)
 	if age < 0 {
 		age = 0
@@ -295,7 +292,11 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 	}
 
 	// Special rendering for branches to match lazygit:
-	// Current: {green}*{green}{white}main{white}{green}✓{green}
+	// Current: {green}*{green}{white}main{white}
+	// No "default branch" checkmark: lore's branchListEntry data has no such
+	// field, and guessing it from the name (e.g. "main"/"master") can both
+	// mislabel a same-named non-default branch and miss the real default
+	// when it's named something else (e.g. "trunk").
 	// Title split (Local/Remotes) handled at panel title level.
 	if bi, ok := listItem.(branchItem); ok {
 		name := bi.branch.Name
@@ -310,18 +311,11 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 		}
 
 		var display string
-		isDefault := !bi.branch.Remote && (name == "main" || name == "master")
 		if bi.branch.Current {
 			display = green.Render("* ") + white.Render(name)
-			if isDefault {
-				display += green.Render(" ✓")
-			}
 		} else {
 			rec := branchRecency(bi.branch)
 			display = cyan.Render(rec+" ") + white.Render(name)
-			if isDefault {
-				display += green.Render(" ✓")
-			}
 		}
 
 		if selected {

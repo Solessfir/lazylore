@@ -8,6 +8,60 @@ import (
 	"lazylore/internal/lore"
 )
 
+func TestModel_VKeyEntersSelectModeAndDisablesMouse(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	m2 := updated.(Model)
+	if !m2.selectMode {
+		t.Fatal("expected selectMode = true after 'v'")
+	}
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd (tea.DisableMouse) after 'v'")
+	}
+}
+
+func TestModel_AnyKeyExitsSelectModeAndRestoresMouse(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	m2 := updated.(Model)
+
+	updated, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m3 := updated.(Model)
+	if m3.selectMode {
+		t.Fatal("expected selectMode = false after any key")
+	}
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd (tea.EnableMouseCellMotion) after exiting select mode")
+	}
+}
+
+func TestModel_VKeyWhileFilteringGoesToFilterInputNotSelectMode(t *testing.T) {
+	// Regression: 'v' used to be checked before the filter-typing bypass,
+	// so it hijacked the keystroke instead of reaching the filter box -
+	// making any filter query containing "v" untypable.
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "test-repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "view.go"}}}})
+	m2 := updated.(Model)
+
+	var filterCmd tea.Cmd
+	m2.files, filterCmd = m2.files.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	_ = filterCmd
+	if !m2.files.SettingFilter() {
+		t.Fatal("expected files list to be in filter-typing state after \"/\"")
+	}
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	m3 := updated.(Model)
+
+	if m3.selectMode {
+		t.Fatal("'v' while filtering must not enter select mode")
+	}
+	if got := m3.files.FilterInput.Value(); got != "v" {
+		t.Fatalf("filter input value = %q, want %q", got, "v")
+	}
+}
+
 func TestUpdateFocusedList_RoutesKeysToDiffViewport(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo")
 	m.focus = focusDiff
