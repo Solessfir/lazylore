@@ -1,55 +1,48 @@
 package lore
 
 import (
+	"encoding/json"
 	"fmt"
-	"strings"
 )
 
-// Branch is one entry from `lore branch list`.
+// Branch is one entry from `lore --json branch list`.
 type Branch struct {
 	Name    string
 	Current bool
 	Remote  bool
 }
 
+// branchListEntryData mirrors LoreBranchListEntryEventData
+// (lore-revision/src/branch.rs) - only the fields Branch uses.
+type branchListEntryData struct {
+	Location  string `json:"location"` // "local" or "remote"
+	Name      string `json:"name"`
+	IsCurrent bool   `json:"isCurrent"`
+}
+
+// ParseBranchList reads `lore --json branch list` output: a
+// branchListEntry event per branch, tagged with which location ("local" or
+// "remote") it came from.
 func ParseBranchList(output string) ([]Branch, error) {
-	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
-	var branches []Branch
-	var remote bool
-	sawHeader := false
-
-	for _, raw := range lines {
-		line := strings.TrimRight(raw, " \t")
-		if line == "" {
-			continue
-		}
-
-		switch line {
-		case "Local branches:":
-			remote = false
-			sawHeader = true
-			continue
-		case "Remote branches:":
-			remote = true
-			sawHeader = true
-			continue
-		}
-		if !sawHeader {
-			continue
-		}
-
-		switch {
-		case strings.HasPrefix(line, "* "):
-			branches = append(branches, Branch{Name: strings.TrimPrefix(line, "* "), Current: true, Remote: remote})
-		case strings.HasPrefix(line, "  "):
-			branches = append(branches, Branch{Name: strings.TrimPrefix(line, "  "), Remote: remote})
-		default:
-			return nil, fmt.Errorf("lore branch list: unrecognized line: %q", line)
-		}
+	events, err := parseEvents(output)
+	if err != nil {
+		return nil, err
 	}
 
-	if !sawHeader {
-		return nil, fmt.Errorf("lore branch list: no section headers found in output")
+	var branches []Branch
+	for _, e := range events {
+		if e.TagName != "branchListEntry" {
+			continue
+		}
+		var data branchListEntryData
+		if err := json.Unmarshal(e.Data, &data); err != nil {
+			return nil, fmt.Errorf("parsing branchListEntry event: %w", err)
+		}
+		branches = append(branches, Branch{
+			Name:    data.Name,
+			Current: data.IsCurrent,
+			Remote:  data.Location == "remote",
+		})
 	}
 	return branches, nil
 }

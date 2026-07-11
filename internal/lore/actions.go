@@ -1,18 +1,38 @@
 package lore
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 )
 
+// runChecked runs a lore command with --json prepended, and treats the
+// output's "complete" event (see events.go) as the authoritative
+// success/failure signal - not the raw process exit code or stderr text.
+// args is the caller-facing command (without --json) so error messages
+// read the way the caller would type the command themselves.
 func runChecked(r Runner, args ...string) (Result, error) {
-	res, err := r.Run(args...)
+	fullArgs := append([]string{"--json"}, args...)
+	res, err := r.Run(fullArgs...)
 	if err != nil {
 		return res, err
 	}
-	if res.ExitCode != 0 {
-		return res, fmt.Errorf("lore %s: %s", strings.Join(args, " "), strings.TrimSpace(res.Stderr))
+
+	events, err := parseEvents(res.Stdout)
+	if err != nil {
+		return res, fmt.Errorf("lore %s: %w", strings.Join(args, " "), err)
+	}
+	complete, err := findComplete(events)
+	if err != nil {
+		return res, fmt.Errorf("lore %s: %w", strings.Join(args, " "), err)
+	}
+	if complete.Status != 0 {
+		msg := complete.Error.Message
+		if msg == "" {
+			msg = strings.TrimSpace(res.Stderr)
+		}
+		return res, fmt.Errorf("lore %s: %s", strings.Join(args, " "), msg)
 	}
 	return res, nil
 }
@@ -33,8 +53,8 @@ func BranchList(r Runner) ([]Branch, error) {
 	return ParseBranchList(res.Stdout)
 }
 
-func HistoryOneline(r Runner, length int) ([]Revision, error) {
-	args := []string{"history", "--oneline"}
+func History(r Runner, length int) ([]Revision, error) {
+	args := []string{"history"}
 	if length > 0 {
 		args = append(args, strconv.Itoa(length))
 	}
@@ -42,7 +62,15 @@ func HistoryOneline(r Runner, length int) ([]Revision, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseHistoryOneline(res.Stdout)
+	return ParseHistory(res.Stdout)
+}
+
+// fileDiffData mirrors the fileDiff event's data: `patch` is the same
+// unified-diff text `lore diff` prints without --json, just delivered
+// through a JSON envelope instead of raw stdout mixed with pager/log noise.
+type fileDiffData struct {
+	Path  string `json:"path"`
+	Patch string `json:"patch"`
 }
 
 func Diff(r Runner, path string) (string, error) {
@@ -50,7 +78,21 @@ func Diff(r Runner, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return res.Stdout, nil
+	events, err := parseEvents(res.Stdout)
+	if err != nil {
+		return "", fmt.Errorf("lore diff %s: %w", path, err)
+	}
+	for _, e := range events {
+		if e.TagName != "fileDiff" {
+			continue
+		}
+		var data fileDiffData
+		if err := json.Unmarshal(e.Data, &data); err != nil {
+			return "", fmt.Errorf("parsing fileDiff event: %w", err)
+		}
+		return data.Patch, nil
+	}
+	return "", nil // no fileDiff event: nothing changed
 }
 
 func Stage(r Runner, paths ...string) (Result, error) {

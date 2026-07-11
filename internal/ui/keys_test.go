@@ -28,7 +28,8 @@ func TestUpdateFocusedList_RoutesKeysToDiffViewport(t *testing.T) {
 
 func TestHandleKey_FilterModeBypassesGlobalShortcuts(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"reset a.txt": {ExitCode: 0},
+		"--json unstage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -60,8 +61,8 @@ func TestHandleKey_FilterModeBypassesGlobalShortcuts(t *testing.T) {
 
 func TestModel_DKeyOnFileOpensDiscardConfirmPrompt(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"unstage a.txt": {ExitCode: 0},
-		"reset a.txt":   {ExitCode: 0},
+		"--json unstage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -85,8 +86,8 @@ func TestModel_DKeyOnFileOpensDiscardConfirmPrompt(t *testing.T) {
 
 func TestModel_YKeyConfirmsDiscardAndUnstagesThenResets(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"unstage a.txt": {ExitCode: 0},
-		"reset a.txt":   {ExitCode: 0},
+		"--json unstage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -113,15 +114,15 @@ func TestModel_YKeyConfirmsDiscardAndUnstagesThenResets(t *testing.T) {
 	if am.err != nil {
 		t.Fatalf("unexpected error: %v", am.err)
 	}
-	if len(fake.Calls) != 2 || fake.Calls[0][0] != "unstage" || fake.Calls[1][0] != "reset" {
+	if len(fake.Calls) != 2 || fake.Calls[0][1] != "unstage" || fake.Calls[1][1] != "reset" {
 		t.Fatalf("Calls = %+v, want unstage then reset (via lore.DiscardChanges)", fake.Calls)
 	}
 }
 
 func TestModel_EscCancelsDiscardPromptWithoutRunnerCalls(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"unstage a.txt": {ExitCode: 0},
-		"reset a.txt":   {ExitCode: 0},
+		"--json unstage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})

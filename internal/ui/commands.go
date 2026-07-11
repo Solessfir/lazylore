@@ -22,7 +22,7 @@ func loadBranchesCmd(r lore.Runner) tea.Cmd {
 
 func loadHistoryCmd(r lore.Runner) tea.Cmd {
 	return func() tea.Msg {
-		h, err := lore.HistoryOneline(r, 50)
+		h, err := lore.History(r, 50)
 		return historyMsg{revisions: h, err: err}
 	}
 }

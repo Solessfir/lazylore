@@ -1,87 +1,104 @@
 package lore
 
 import (
+	"encoding/json"
 	"fmt"
-	"strings"
 )
 
-// FileChange is one entry from a lore status listing, e.g. "A hello.txt".
+// FileChange is one changed file from a lore status listing.
 type FileChange struct {
-	Status byte
+	Status byte // 'A' add, 'M' modify, 'D' delete, 'C' copy - see fileActionDisplayByte
 	Path   string
 }
 
-// Status is the parsed result of `lore status` / `lore status --scan`.
+// Status is the parsed result of `lore --json status --scan`.
 type Status struct {
 	Repository string
 	Branch     string
-	Summary    []string
 	Staged     []FileChange
 	Unstaged   []FileChange
 }
 
+// repositoryStatusRevisionData mirrors LoreRepositoryStatusRevisionEventData
+// (lore-revision/src/repository/status.rs) - only the fields Status uses.
+type repositoryStatusRevisionData struct {
+	Repository string `json:"repository"`
+	BranchName string `json:"branchName"`
+}
+
+// repositoryStatusFileData mirrors LoreRepositoryStatusFileEventData
+// (same file) - only the fields Status uses.
+type repositoryStatusFileData struct {
+	Path       string `json:"path"`
+	Action     string `json:"action"`
+	FlagStaged bool   `json:"flagStaged"`
+	FlagDirty  bool   `json:"flagDirty"`
+}
+
+// ParseStatus reads `lore --json status --scan` output: a
+// repositoryStatusRevision event for Repository/Branch, then zero or more
+// repositoryStatusFile events (one per changed path), routed into
+// Staged/Unstaged by FlagStaged.
 func ParseStatus(output string) (Status, error) {
-	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+	events, err := parseEvents(output)
+	if err != nil {
+		return Status{}, err
+	}
+
 	var s Status
-	var section string
+	sawRevision := false
 
-	for _, raw := range lines {
-		line := strings.TrimRight(raw, " \t")
-		if line == "" {
-			continue
-		}
-
-		switch {
-		case strings.HasPrefix(line, "Repository "):
-			s.Repository = strings.TrimPrefix(line, "Repository ")
-			s.Summary = append(s.Summary, line)
-			continue
-		case strings.HasPrefix(line, "On branch "):
-			rest := strings.TrimPrefix(line, "On branch ")
-			if idx := strings.Index(rest, " "); idx >= 0 {
-				s.Branch = rest[:idx]
-			} else {
-				s.Branch = rest
+	for _, e := range events {
+		switch e.TagName {
+		case "repositoryStatusRevision":
+			var data repositoryStatusRevisionData
+			if err := json.Unmarshal(e.Data, &data); err != nil {
+				return Status{}, fmt.Errorf("parsing repositoryStatusRevision event: %w", err)
 			}
-			s.Summary = append(s.Summary, line)
-			continue
-		case line == "Changes staged for commit:":
-			section = "staged"
-			continue
-		case line == "Changes not staged for commit:", line == "Untracked files:":
-			section = "unstaged"
-			continue
-		case strings.HasPrefix(line, "Tracked changes:"):
-			continue
-		}
+			s.Repository = data.Repository
+			s.Branch = data.BranchName
+			sawRevision = true
 
-		if section == "" {
-			s.Summary = append(s.Summary, line)
-			continue
-		}
-
-		change, ok := parseFileChangeLine(line)
-		if !ok {
-			return Status{}, fmt.Errorf("lore status: unrecognized line in %q section: %q", section, line)
-		}
-		switch section {
-		case "staged":
-			s.Staged = append(s.Staged, change)
-		case "unstaged":
-			s.Unstaged = append(s.Unstaged, change)
+		case "repositoryStatusFile":
+			var data repositoryStatusFileData
+			if err := json.Unmarshal(e.Data, &data); err != nil {
+				return Status{}, fmt.Errorf("parsing repositoryStatusFile event: %w", err)
+			}
+			change := FileChange{Status: fileActionDisplayByte(data.Action, data.FlagDirty), Path: data.Path}
+			if data.FlagStaged {
+				s.Staged = append(s.Staged, change)
+			} else {
+				s.Unstaged = append(s.Unstaged, change)
+			}
 		}
 	}
 
-	if s.Repository == "" {
-		return Status{}, fmt.Errorf("lore status: could not find a Repository line in output")
+	if !sawRevision {
+		return Status{}, fmt.Errorf("lore status: no repositoryStatusRevision event found in output")
 	}
 	return s, nil
 }
 
-func parseFileChangeLine(line string) (FileChange, bool) {
-	parts := strings.SplitN(line, " ", 2)
-	if len(parts) != 2 || len(parts[0]) != 1 {
-		return FileChange{}, false
+// fileActionDisplayByte maps lore's LoreFileAction ("add"/"delete"/"move"/
+// "copy"/"keep" - confirmed at lore-revision/src/interface.rs) to a single
+// git-style display letter. "keep" with FlagDirty set means the file's
+// identity didn't change but its content did, i.e. a modification; "keep"
+// without FlagDirty (an unchanged file) shouldn't be reported by status at
+// all, but falls back to a blank marker rather than erroring if it ever is.
+func fileActionDisplayByte(action string, dirty bool) byte {
+	switch action {
+	case "add":
+		return 'A'
+	case "delete":
+		return 'D'
+	case "move":
+		return 'M'
+	case "copy":
+		return 'C'
+	default: // "keep"
+		if dirty {
+			return 'M'
+		}
+		return ' '
 	}
-	return FileChange{Status: parts[0][0], Path: parts[1]}, true
 }

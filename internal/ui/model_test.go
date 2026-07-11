@@ -35,8 +35,7 @@ func TestModel_TabCyclesFocusForward(t *testing.T) {
 
 func TestModel_SpaceOnUnstagedFileDispatchesStageCmd(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"stage a.txt":   {ExitCode: 0},
-		"status --scan": {ExitCode: 0, Stdout: "Repository x\nOn branch main revision 0 -> 0\n"},
+		"--json stage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -54,14 +53,15 @@ func TestModel_SpaceOnUnstagedFileDispatchesStageCmd(t *testing.T) {
 	if am.err != nil {
 		t.Fatalf("unexpected error: %v", am.err)
 	}
-	if len(fake.Calls) != 1 || fake.Calls[0][0] != "stage" {
+	if len(fake.Calls) != 1 || fake.Calls[0][1] != "stage" {
 		t.Fatalf("Calls = %+v, want a single stage call", fake.Calls)
 	}
 }
 
 func TestModel_EnterOnFileDispatchesLoadDiffCmd(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"diff a.txt": {ExitCode: 0, Stdout: "+++ a.txt\n"},
+		"--json diff a.txt": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"a.txt","patch":"+++ a.txt\n","action":"keep"}}
+` + jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -83,7 +83,7 @@ func TestModel_EnterOnFileDispatchesLoadDiffCmd(t *testing.T) {
 
 func TestModel_CommitPromptSubmitsMessage(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"commit hi": {ExitCode: 0},
+		"--json commit hi": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo")
 
@@ -108,16 +108,18 @@ func TestModel_CommitPromptSubmitsMessage(t *testing.T) {
 	if am.err != nil {
 		t.Fatalf("unexpected error: %v", am.err)
 	}
-	if len(fake.Calls) != 1 || fake.Calls[0][0] != "commit" || fake.Calls[0][1] != "hi" {
+	if len(fake.Calls) != 1 || fake.Calls[0][1] != "commit" || fake.Calls[0][2] != "hi" {
 		t.Fatalf("Calls = %+v, want a single commit call with message \"hi\"", fake.Calls)
 	}
 }
 
 func TestModel_ActionDoneMsgAppendsToCommandLogAndRefreshes(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"status --scan":        {ExitCode: 0, Stdout: "Repository x\nOn branch main revision 0 -> 0\n"},
-		"branch list":          {ExitCode: 0, Stdout: "Local branches:\n* main\nRemote branches:\n"},
-		"history --oneline 50": {ExitCode: 0, Stdout: ""},
+		"--json status --scan": {ExitCode: 0, Stdout: `{"tagName":"repositoryStatusRevision","data":{"repository":"x","branchName":"main"}}
+` + jsonCompleteSuccess},
+		"--json branch list": {ExitCode: 0, Stdout: `{"tagName":"branchListEntry","data":{"location":"local","name":"main","isCurrent":true}}
+` + jsonCompleteSuccess},
+		"--json history 50": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo")
 	updated, cmd := m.Update(actionDoneMsg{label: "stage a.txt"})

@@ -6,9 +6,17 @@ import (
 	"lazylore/internal/lore"
 )
 
+// jsonCompleteSuccess is the minimal real shape of a --json command's
+// terminal event on success - shared by every test in this package that
+// exercises a Runner call without needing to assert on the response body.
+const jsonCompleteSuccess = `{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
+`
+
 func TestLoadStatusCmd_ReturnsStatusMsg(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"status --scan": {ExitCode: 0, Stdout: "Repository abc\nOn branch main revision 0 -> 0\n"},
+		"--json status --scan": {ExitCode: 0, Stdout: `{"tagName":"repositoryStatusRevision","data":{"repository":"abc","branchName":"main"}}
+{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
+`},
 	}}
 	msg := loadStatusCmd(fake)()
 	sm, ok := msg.(statusMsg)
@@ -25,7 +33,10 @@ func TestLoadStatusCmd_ReturnsStatusMsg(t *testing.T) {
 
 func TestLoadBranchesCmd_ReturnsBranchesMsg(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"branch list": {ExitCode: 0, Stdout: "Local branches:\n* main\nRemote branches:\n  main\n"},
+		"--json branch list": {ExitCode: 0, Stdout: `{"tagName":"branchListEntry","data":{"location":"local","name":"main","isCurrent":true}}
+{"tagName":"branchListEntry","data":{"location":"remote","name":"main","isCurrent":false}}
+{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
+`},
 	}}
 	msg := loadBranchesCmd(fake)()
 	bm, ok := msg.(branchesMsg)
@@ -39,7 +50,10 @@ func TestLoadBranchesCmd_ReturnsBranchesMsg(t *testing.T) {
 
 func TestLoadHistoryCmd_ReturnsHistoryMsg(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"history --oneline 50": {ExitCode: 0, Stdout: "1 Initial revision\n"},
+		"--json history 50": {ExitCode: 0, Stdout: `{"tagName":"revisionHistoryEntry","data":{"revision":"abc","revisionNumber":1,"parent":["0","0"]}}
+{"tagName":"metadata","data":{"key":"message","value":{"tagName":"string","data":"Initial revision"}}}
+{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
+`},
 	}}
 	msg := loadHistoryCmd(fake)()
 	hm, ok := msg.(historyMsg)
@@ -53,7 +67,9 @@ func TestLoadHistoryCmd_ReturnsHistoryMsg(t *testing.T) {
 
 func TestLoadDiffCmd_ReturnsDiffMsg(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"diff hello.txt": {ExitCode: 0, Stdout: "+++ hello.txt\n"},
+		"--json diff hello.txt": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"hello.txt","patch":"+++ hello.txt\n","action":"keep"}}
+{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
+`},
 	}}
 	msg := loadDiffCmd(fake, "hello.txt")()
 	dm, ok := msg.(diffMsg)
@@ -67,7 +83,7 @@ func TestLoadDiffCmd_ReturnsDiffMsg(t *testing.T) {
 
 func TestStageCmd_CallsRunnerAndReturnsActionDoneMsg(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"stage hello.txt": {ExitCode: 0},
+		"--json stage hello.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	msg := stageCmd(fake, "hello.txt")()
 	am, ok := msg.(actionDoneMsg)
@@ -84,7 +100,7 @@ func TestStageCmd_CallsRunnerAndReturnsActionDoneMsg(t *testing.T) {
 
 func TestCommitCmd_ReturnsErrorOnFailure(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"commit oops": {ExitCode: 1, Stderr: "nothing staged"},
+		"--json commit oops": {ExitCode: 1, Stdout: "{\"tagName\":\"complete\",\"data\":{\"status\":-1,\"error\":{\"errorCode\":-1,\"message\":\"nothing staged\",\"traceLocations\":[]}}}\n"},
 	}}
 	msg := commitCmd(fake, "oops")()
 	am, ok := msg.(actionDoneMsg)

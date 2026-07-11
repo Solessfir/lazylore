@@ -6,41 +6,34 @@ import (
 	"lazylore/internal/lore"
 )
 
-// Captured verbatim from `lore.exe status` against a real local demo repo.
-const statusCleanOutput = `Repository 019f46fd1f7b7880a88e902a7b44074a
-On branch main revision 0 -> 0000000000000000000000000000000000000000000000000000000000000000
-Remote revision 0 -> 0000000000000000000000000000000000000000000000000000000000000000
-Local branch in sync with remote
+// Captured verbatim from `lore.exe --json status` against a real repo with
+// no staged or dirty files.
+const statusCleanOutput = `{"tagName":"repositoryStatusRevision","data":{"repository":"019f46fd1f7b7880a88e902a7b44074a","branch":"019f46fd51147821aed79f28a839f591","branchName":"my-first-branch","revision":"45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2","revisionNumber":2,"revisionStaged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMerged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMergedParentBranch":"0000000000000000000000000000000000000000000000000000000000000000","revisionLocal":"45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2","revisionLocalNumber":2,"revisionRemote":"0000000000000000000000000000000000000000000000000000000000000000","revisionRemoteNumber":0,"isLocalAhead":0,"isRemoteAhead":0,"remoteAvailable":1,"remoteAuthorized":1,"remoteBranchExist":0}}
+{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `
 
-// Captured verbatim from `lore.exe status --scan` before any file was staged.
-const statusUntrackedOutput = `Repository 019f46fd1f7b7880a88e902a7b44074a
-On branch main revision 0 -> 0000000000000000000000000000000000000000000000000000000000000000
-Remote revision 0 -> 0000000000000000000000000000000000000000000000000000000000000000
-Local branch in sync with remote
-Untracked files:
-A hello.txt
-A sample.bin
-Tracked changes: 2 added
+// Captured verbatim from `lore.exe --json status --scan` with a genuinely
+// new, never-tracked file present ("action":"add").
+const statusUntrackedOutput = `{"tagName":"repositoryStatusRevision","data":{"repository":"019f46fd1f7b7880a88e902a7b44074a","branch":"019f46fd51147821aed79f28a839f591","branchName":"my-first-branch","revision":"45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2","revisionNumber":2,"revisionStaged":"2c7693347baefa2b6aaec3fabd7b15a79a7de94c3909036e3ffc62a039c40564","revisionMerged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMergedParentBranch":"0000000000000000000000000000000000000000000000000000000000000000","revisionLocal":"45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2","revisionLocalNumber":2,"revisionRemote":"0000000000000000000000000000000000000000000000000000000000000000","revisionRemoteNumber":0,"isLocalAhead":0,"isRemoteAhead":0,"remoteAvailable":1,"remoteAuthorized":1,"remoteBranchExist":0}}
+{"tagName":"repositoryStatusFile","data":{"path":"totally-new-file.txt","size":15,"action":"add","type":"file","flagStaged":false,"flagMerged":false,"flagConflict":false,"flagConflictUnresolved":false,"flagConflictAutomerged":false,"flagConflictMine":false,"flagConflictTheirs":false,"flagDirty":true,"fromPath":""}}
+{"tagName":"repositoryStatusSummary","data":{"adds":1,"deletes":0,"modifies":0,"moves":0,"copies":0}}
+{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `
 
-// Captured verbatim from `lore.exe status` after `lore.exe stage hello.txt sample.bin`.
-const statusStagedOutput = "Repository 019f46fd1f7b7880a88e902a7b44074a\n" +
-	"On branch main revision 0 -> 0000000000000000000000000000000000000000000000000000000000000000\n" +
-	"Remote revision 0 -> 0000000000000000000000000000000000000000000000000000000000000000\n" +
-	"Local branch in sync with remote\n" +
-	"Changes staged for commit:\n" +
-	"A hello.txt \n" +
-	"A sample.bin \n"
+// Captured verbatim from `lore.exe --json status --scan` after
+// `lore.exe --json stage hello.txt` ("flagStaged":true).
+const statusStagedOutput = `{"tagName":"repositoryStatusRevision","data":{"repository":"019f46fd1f7b7880a88e902a7b44074a","branch":"019f46fd51147821aed79f28a839f591","branchName":"my-first-branch","revision":"45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2","revisionNumber":2,"revisionStaged":"2c7693347baefa2b6aaec3fabd7b15a79a7de94c3909036e3ffc62a039c40564","revisionMerged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMergedParentBranch":"0000000000000000000000000000000000000000000000000000000000000000","revisionLocal":"45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2","revisionLocalNumber":2,"revisionRemote":"0000000000000000000000000000000000000000000000000000000000000000","revisionRemoteNumber":0,"isLocalAhead":0,"isRemoteAhead":0,"remoteAvailable":1,"remoteAuthorized":1,"remoteBranchExist":0}}
+{"tagName":"repositoryStatusFile","data":{"path":"hello.txt","size":40,"action":"keep","type":"file","flagStaged":true,"flagMerged":false,"flagConflict":false,"flagConflictUnresolved":false,"flagConflictAutomerged":false,"flagConflictMine":false,"flagConflictTheirs":false,"flagDirty":true,"fromPath":""}}
+{"tagName":"repositoryStatusSummary","data":{"adds":0,"deletes":0,"modifies":1,"moves":0,"copies":0}}
+{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
+`
 
-// Captured verbatim from `lore.exe status --scan` after editing a tracked file post-commit.
-const statusModifiedOutput = `Repository 019f46fd1f7b7880a88e902a7b44074a
-On branch main revision 1 -> b3e648f10d02c6162433bfdb49c06012027d19bc586560647d0bf2ff6278c195
-Remote revision 0 -> 0000000000000000000000000000000000000000000000000000000000000000
-Local branch is ahead of remote
-Changes not staged for commit:
-M hello.txt
-Tracked changes: 1 modified
+// Captured verbatim from `lore.exe --json status --scan` on a tracked file
+// edited but not yet staged ("flagStaged":false,"flagDirty":true).
+const statusModifiedOutput = `{"tagName":"repositoryStatusRevision","data":{"repository":"019f46fd1f7b7880a88e902a7b44074a","branch":"019f46fd51147821aed79f28a839f591","branchName":"my-first-branch","revision":"45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2","revisionNumber":2,"revisionStaged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMerged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMergedParentBranch":"0000000000000000000000000000000000000000000000000000000000000000","revisionLocal":"45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2","revisionLocalNumber":2,"revisionRemote":"0000000000000000000000000000000000000000000000000000000000000000","revisionRemoteNumber":0,"isLocalAhead":0,"isRemoteAhead":0,"remoteAvailable":1,"remoteAuthorized":1,"remoteBranchExist":0}}
+{"tagName":"repositoryStatusFile","data":{"path":"hello.txt","size":40,"action":"keep","type":"file","flagStaged":false,"flagMerged":false,"flagConflict":false,"flagConflictUnresolved":false,"flagConflictAutomerged":false,"flagConflictMine":false,"flagConflictTheirs":false,"flagDirty":true,"fromPath":""}}
+{"tagName":"repositoryStatusSummary","data":{"adds":0,"deletes":0,"modifies":1,"moves":0,"copies":0}}
+{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `
 
 func TestParseStatus_Clean(t *testing.T) {
@@ -51,8 +44,8 @@ func TestParseStatus_Clean(t *testing.T) {
 	if s.Repository != "019f46fd1f7b7880a88e902a7b44074a" {
 		t.Fatalf("Repository = %q", s.Repository)
 	}
-	if s.Branch != "main" {
-		t.Fatalf("Branch = %q, want main", s.Branch)
+	if s.Branch != "my-first-branch" {
+		t.Fatalf("Branch = %q, want my-first-branch", s.Branch)
 	}
 	if len(s.Staged) != 0 || len(s.Unstaged) != 0 {
 		t.Fatalf("expected no staged/unstaged files, got %+v / %+v", s.Staged, s.Unstaged)
@@ -64,14 +57,9 @@ func TestParseStatus_Untracked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := []lore.FileChange{{Status: 'A', Path: "hello.txt"}, {Status: 'A', Path: "sample.bin"}}
-	if len(s.Unstaged) != len(want) {
-		t.Fatalf("Unstaged = %+v, want %+v", s.Unstaged, want)
-	}
-	for i, fc := range want {
-		if s.Unstaged[i] != fc {
-			t.Fatalf("Unstaged[%d] = %+v, want %+v", i, s.Unstaged[i], fc)
-		}
+	want := lore.FileChange{Status: 'A', Path: "totally-new-file.txt"}
+	if len(s.Unstaged) != 1 || s.Unstaged[0] != want {
+		t.Fatalf("Unstaged = %+v, want [%+v]", s.Unstaged, want)
 	}
 	if len(s.Staged) != 0 {
 		t.Fatalf("Staged = %+v, want empty", s.Staged)
@@ -83,14 +71,12 @@ func TestParseStatus_Staged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := []lore.FileChange{{Status: 'A', Path: "hello.txt"}, {Status: 'A', Path: "sample.bin"}}
-	if len(s.Staged) != len(want) {
-		t.Fatalf("Staged = %+v, want %+v", s.Staged, want)
+	want := lore.FileChange{Status: 'M', Path: "hello.txt"}
+	if len(s.Staged) != 1 || s.Staged[0] != want {
+		t.Fatalf("Staged = %+v, want [%+v]", s.Staged, want)
 	}
-	for i, fc := range want {
-		if s.Staged[i] != fc {
-			t.Fatalf("Staged[%d] = %+v, want %+v", i, s.Staged[i], fc)
-		}
+	if len(s.Unstaged) != 0 {
+		t.Fatalf("Unstaged = %+v, want empty", s.Unstaged)
 	}
 }
 
@@ -105,9 +91,16 @@ func TestParseStatus_ModifiedUnstaged(t *testing.T) {
 	}
 }
 
-func TestParseStatus_ErrorsOnEmptyInput(t *testing.T) {
-	_, err := lore.ParseStatus("")
+func TestParseStatus_ErrorsWhenNoRevisionEvent(t *testing.T) {
+	_, err := lore.ParseStatus(`{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}` + "\n")
 	if err == nil {
-		t.Fatal("expected an error for output missing a Repository line")
+		t.Fatal("expected an error for output missing a repositoryStatusRevision event")
+	}
+}
+
+func TestParseStatus_ErrorsOnMalformedInput(t *testing.T) {
+	_, err := lore.ParseStatus(`not json at all`)
+	if err == nil {
+		t.Fatal("expected an error for malformed --json output")
 	}
 }
