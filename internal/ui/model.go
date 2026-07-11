@@ -65,16 +65,27 @@ var (
 // should get the strong background fill; the others get a much subtler
 // style, matching lazygit's own InactiveViewSelectedLineBgColor: "bold"
 // (no background fill at all for unfocused panels).
-func newListDelegate(focused bool) list.ItemDelegate {
+//
+// width bounds the background fill to the panel's own content width.
+// list.DefaultDelegate.Render (bubbles' own code, not ours) never calls
+// .Width() on the selected style itself, so without setting it here the
+// fill isn't bounded to this panel at all - it bleeds across the rest of
+// the terminal row, past the panel's own border. Because the delegate
+// bakes width in at construction time rather than reading it live, callers
+// must rebuild it (via syncFocusDelegates) whenever that width changes,
+// not just when focus changes - resize() does both.
+func newListDelegate(focused bool, width int) list.ItemDelegate {
 	d := list.NewDefaultDelegate()
 	if focused {
 		d.Styles.SelectedTitle = d.Styles.SelectedTitle.
 			Background(selectedBg).
 			Foreground(selectedFg).
-			Bold(true)
+			Bold(true).
+			Width(width)
 		d.Styles.SelectedDesc = d.Styles.SelectedDesc.
 			Background(selectedBg).
-			Foreground(selectedFg)
+			Foreground(selectedFg).
+			Width(width)
 	} else {
 		d.Styles.SelectedTitle = d.Styles.SelectedTitle.Bold(true)
 	}
@@ -102,8 +113,8 @@ func newPanelList(delegate list.ItemDelegate) list.Model {
 // this app's, so the delegate has to be pushed in from outside.
 func (m *Model) syncFocusDelegates() {
 	m.files.SetDelegate(fileDelegate{focused: m.focus == focusFiles})
-	m.branches.SetDelegate(newListDelegate(m.focus == focusBranches))
-	m.history.SetDelegate(newListDelegate(m.focus == focusHistory))
+	m.branches.SetDelegate(newListDelegate(m.focus == focusBranches, m.panelWidth))
+	m.history.SetDelegate(newListDelegate(m.focus == focusHistory, m.panelWidth))
 }
 
 // toggleDirCollapse flips the open/closed state of a Files-panel directory
@@ -122,10 +133,12 @@ func NewModel(r lore.Runner, repoName string) Model {
 		runner:        r,
 		repoName:      repoName,
 		collapsedDirs: map[string]bool{},
-		// focusFiles is the initial focus, below.
+		// focusFiles is the initial focus, below. width is 0 until the first
+		// resize() - fine, syncFocusDelegates rebuilds these once real
+		// dimensions are known.
 		files:    newPanelList(fileDelegate{focused: true}),
-		branches: newPanelList(newListDelegate(false)),
-		history:  newPanelList(newListDelegate(false)),
+		branches: newPanelList(newListDelegate(false, 0)),
+		history:  newPanelList(newListDelegate(false, 0)),
 		diff:     newDiffModel(0, 0),
 		log:      newCommandLogModel(20),
 		focus:    focusFiles,
@@ -208,6 +221,11 @@ func (m *Model) resize() {
 
 	m.diff.vp.Width = max(0, rightWidth-borderWidth)
 	m.diff.vp.Height = max(0, m.diffHeight-titleRowHeight)
+
+	// Branches/History's selected-row width is baked into their delegate
+	// (see newListDelegate) rather than read live, so it has to be rebuilt
+	// whenever panelWidth changes here, not just on focus changes.
+	m.syncFocusDelegates()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

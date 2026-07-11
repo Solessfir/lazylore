@@ -10,6 +10,24 @@ import (
 	"lazylore/internal/lore"
 )
 
+func TestSelectedRowStyle_BoundedToGivenWidth(t *testing.T) {
+	// This is the actual bug: without an explicit Width(), the background
+	// fill isn't bounded to this panel's own content width at all, and
+	// bleeds across the rest of the terminal row past the panel's border.
+	got := selectedRowStyle(42)
+	if got.GetWidth() != 42 {
+		t.Fatalf("selectedRowStyle(42).GetWidth() = %d, want 42", got.GetWidth())
+	}
+	if got.GetBackground() != selectedBg {
+		t.Fatalf("selectedRowStyle background = %v, want %v", got.GetBackground(), selectedBg)
+	}
+	// No Foreground override - the row's own status color (set before this
+	// style wraps it) should still show through underneath the highlight.
+	if got.GetForeground() != (lipgloss.NoColor{}) {
+		t.Fatalf("selectedRowStyle foreground = %v, want unset (preserves the wrapped text's own color)", got.GetForeground())
+	}
+}
+
 func TestFileItem_FilterValueIsThePath(t *testing.T) {
 	item := fileItem{path: "hello.txt", change: lore.FileChange{Status: 'M', Path: "hello.txt"}, staged: false}
 	if item.FilterValue() != "hello.txt" {
