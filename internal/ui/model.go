@@ -218,6 +218,19 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	effHistoryH := max(0, leftOuters[3]-borderHeight)
 	effDiffH := m.diffHeight + extra
 
+	// Resync each list's own Paginator.PerPage to the height actually
+	// rendered THIS frame before doing any click math. list.Model.Select
+	// (called below) divides by its own Paginator.PerPage internally, which
+	// - like the field rowsPerPage/rowClickTarget already route around on
+	// the read side - drifts stale relative to what's on screen (View() has
+	// a value receiver, so its own SetSize call never persists). Without
+	// this resync, Select still re-derives Page from the stale PerPage and
+	// can jump to a different page on the very next render, even though the
+	// clicked row was computed correctly - a visible "shift" on click.
+	m.files.SetSize(m.panelWidth, effFilesH)
+	m.branches.SetSize(m.panelWidth, effBranchesH)
+	m.history.SetSize(m.panelWidth, effHistoryH)
+
 	leftW := m.panelWidth + borderWidth
 	statusH := statusPanelHeight
 	filesH := effFilesH + borderHeight

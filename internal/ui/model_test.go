@@ -77,6 +77,58 @@ func TestRowClickTarget_AcceptsLastRealItemEvenWhenPaginatorPerPageWouldBeStale(
 	}
 }
 
+func TestModel_ClickDoesNotPageJumpWhenPaginatorWasStale(t *testing.T) {
+	// Regression: rowClickTarget already computed the right target using a
+	// freshly-derived perPage, but list.Model.Select (bubbles' own method)
+	// re-derives Page by dividing by its OWN Paginator.PerPage internally -
+	// which was still the stale (pre-resize) value at click time. Select
+	// could then land on a DIFFERENT page than the one actually on screen,
+	// causing a visible jump on the next render even though the click
+	// itself resolved to the correct item. handleMouseClick must resync
+	// each list's SetSize to the current frame's height before calling
+	// Select, so Select's own division uses the same perPage rowClickTarget
+	// did.
+	files := []lore.FileChange{
+		{Status: 'A', Path: "Plugins/LoreSourceControl/Config"},
+		{Status: 'A', Path: "Plugins/LoreSourceControl/Config/FilterPlugin.ini"},
+		{Status: 'M', Path: "Plugins/LoreSourceControl/LoreSourceControl.uplugin"},
+		{Status: 'A', Path: "Plugins/LoreSourceControl/README.md"},
+		{Status: 'A', Path: "Plugins/LoreSourceControl/Resources/Icon128.png"},
+	}
+	m := NewModel(&lore.FakeRunner{}, "Sus", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 155, Height: 40})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(statusMsg{status: lore.Status{Unstaged: files}})
+	m3 := updated.(Model)
+
+	items := m3.files.Items()
+	iconIdx := -1
+	for i, it := range items {
+		if fi, ok := it.(fileItem); ok && fi.path == "Plugins/LoreSourceControl/Resources/Icon128.png" {
+			iconIdx = i
+		}
+	}
+	if iconIdx == -1 {
+		t.Fatal("Icon128.png not found in flattened items")
+	}
+	if got := m3.files.Paginator.PerPage; got != 8 {
+		t.Fatalf("precondition failed: Paginator.PerPage = %d, want the stale value 8 (real per-page capacity is 9)", got)
+	}
+
+	// statusPanelHeight(3) + files top border(1) + row offset = Icon128.png's row.
+	clickY := 3 + 1 + iconIdx
+	updated, _ = m3.Update(tea.MouseMsg{X: 10, Y: clickY, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m4 := updated.(Model)
+
+	sel, ok := m4.files.SelectedItem().(fileItem)
+	if !ok || sel.path != "Plugins/LoreSourceControl/Resources/Icon128.png" {
+		t.Fatalf("click did not select Icon128.png; got %+v", sel)
+	}
+	if m4.files.Paginator.Page != 0 {
+		t.Fatalf("Paginator.Page = %d, want 0 - the click should not have paged away from what was on screen", m4.files.Paginator.Page)
+	}
+}
+
 func TestChangedPaths_CombinesStagedThenUnstaged(t *testing.T) {
 	s := lore.Status{
 		Staged:   []lore.FileChange{{Status: 'A', Path: "a.txt"}},
