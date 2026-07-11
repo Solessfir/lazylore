@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/paginator"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -144,6 +145,31 @@ func (m *Model) syncFocusDelegates() {
 	m.history.SetShowPagination(false)
 }
 
+// rowClickTarget maps a list panel's clicked row (relY, 0-based within the
+// panel's content area) to the absolute item index it corresponds to on the
+// CURRENT page, or ok=false if relY falls on a blank/padding row.
+//
+// bubbles/list.Model always reserves one row at the top of its own View()
+// output for a potential filter input (tied to filteringEnabled, independent
+// of ShowTitle - see list.go's updatePagination), which lazylore's border
+// rendering strips and lipgloss re-pads at the bottom instead. Bounding the
+// click only against the TOTAL item count across all pages (`target <
+// len(vis)`) let a click on that bottom padding row resolve to a real item
+// on a page that isn't even visible, silently flipping Select()'s page and
+// desyncing every click after it from what's actually on screen.
+func rowClickTarget(p paginator.Model, vis []list.Item, relY int) (int, bool) {
+	perPage := p.PerPage
+	if perPage < 1 {
+		perPage = 1
+	}
+	pageStart := p.Page * perPage
+	itemsOnPage := min(perPage, len(vis)-pageStart)
+	if relY < 0 || relY >= itemsOnPage {
+		return 0, false
+	}
+	return pageStart + relY, true
+}
+
 // handleMouseClick handles left-clicks to focus panels and select items inside
 // lists (Files, Branches, History), similar to lazygit mouse behavior.
 // Diff viewport also receives mouse events for scrolling.
@@ -216,13 +242,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if y >= filesBoxTop+1 && y < filesBoxTop+filesH-1 {
 				relY := y - (filesBoxTop + 1)
 				if relY >= 0 && relY < effFilesH {
-					perPage := m.files.Paginator.PerPage
-					if perPage < 1 {
-						perPage = 1
-					}
-					target := m.files.Paginator.Page*perPage + relY
-					vis := m.files.VisibleItems()
-					if target < len(vis) {
+					if target, ok := rowClickTarget(m.files.Paginator, m.files.VisibleItems(), relY); ok {
 						m.files.Select(target)
 						if dcmd := (&m).ensureDiffForSelectedFile(); dcmd != nil {
 							cmd = dcmd
@@ -246,13 +266,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if y >= branchesBoxTop+1 && y < branchesBoxTop+branchesH-1 {
 				relY := y - (branchesBoxTop + 1)
 				if relY >= 0 && relY < effBranchesH {
-					perPage := m.branches.Paginator.PerPage
-					if perPage < 1 {
-						perPage = 1
-					}
-					target := m.branches.Paginator.Page*perPage + relY
-					vis := m.branches.VisibleItems()
-					if target < len(vis) {
+					if target, ok := rowClickTarget(m.branches.Paginator, m.branches.VisibleItems(), relY); ok {
 						m.branches.Select(target)
 					}
 				}
@@ -262,13 +276,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if y >= historyBoxTop+1 && y < historyBoxTop+historyH-1 {
 				relY := y - (historyBoxTop + 1)
 				if relY >= 0 && relY < effHistoryH {
-					perPage := m.history.Paginator.PerPage
-					if perPage < 1 {
-						perPage = 1
-					}
-					target := m.history.Paginator.Page*perPage + relY
-					vis := m.history.VisibleItems()
-					if target < len(vis) {
+					if target, ok := rowClickTarget(m.history.Paginator, m.history.VisibleItems(), relY); ok {
 						m.history.Select(target)
 					}
 				}
