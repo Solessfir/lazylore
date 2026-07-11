@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -13,6 +14,7 @@ const (
 	focusFiles focusPanel = iota
 	focusBranches
 	focusHistory
+	focusStash
 	focusDiff
 )
 
@@ -26,6 +28,17 @@ const (
 )
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "v":
+		// Visual selection helper: write the exact current screen layout to a
+		// file so it can be copied/pasted to show alignment bugs etc.
+		view := m.View()
+		if err := os.WriteFile("lazylore-layout.txt", []byte(view), 0644); err == nil {
+			m.log.Append("Saved exact layout to lazylore-layout.txt (cat it and copy the broken alignment)")
+		}
+		return m, nil
+	}
+
 	if m.focusedListIsFiltering() {
 		return m.updateFocusedList(msg)
 	}
@@ -35,13 +48,44 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "tab", "l":
-		m.focus = (m.focus + 1) % 4
+		m.focus = (m.focus + 1) % 5
 		m.syncFocusDelegates()
+		(&m).recomputePanelHeights()
 		return m, nil
 
 	case "shift+tab", "h":
-		m.focus = (m.focus + 3) % 4
+		m.focus = (m.focus + 4) % 5
 		m.syncFocusDelegates()
+		(&m).recomputePanelHeights()
+		return m, nil
+
+	// Panel jump keys like lazygit (1/2=Files (under Status), 3=Branches, 4=History, 5=Stash, 6=Diff)
+	case "1":
+		m.focus = focusFiles
+		m.syncFocusDelegates()
+		return m, nil
+	case "2":
+		m.focus = focusFiles
+		m.syncFocusDelegates()
+		return m, nil
+	case "3":
+		m.focus = focusBranches
+		m.syncFocusDelegates()
+		return m, nil
+	case "4":
+		m.focus = focusHistory
+		m.syncFocusDelegates()
+		(&m).recomputePanelHeights()
+		return m, nil
+	case "5":
+		m.focus = focusStash
+		m.syncFocusDelegates()
+		(&m).recomputePanelHeights()
+		return m, nil
+	case "6":
+		m.focus = focusDiff
+		m.syncFocusDelegates()
+		(&m).recomputePanelHeights()
 		return m, nil
 
 	case "c":
@@ -65,9 +109,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, m.toggleDirCollapse(item.path)
 				}
 				if item.staged {
-					return m, unstageCmd(m.runner, item.change.Path)
+					return m, tea.Batch(
+						func() tea.Msg { return setAppStatusMsg("Unstaging...") },
+						unstageCmd(m.runner, item.change.Path),
+					)
 				}
-				return m, stageCmd(m.runner, item.change.Path)
+				return m, tea.Batch(
+					func() tea.Msg { return setAppStatusMsg("Staging...") },
+					stageCmd(m.runner, item.change.Path),
+				)
 			}
 		}
 		return m, nil
@@ -88,11 +138,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if item.isDir {
 					return m, m.toggleDirCollapse(item.path)
 				}
-				return m, loadDiffCmd(m.runner, item.change.Path)
+				return m, tea.Batch(
+					func() tea.Msg { return setAppStatusMsg("Loading diff...") },
+					loadDiffCmd(m.runner, item.change.Path),
+				)
 			}
 		case focusBranches:
 			if item, ok := m.branches.SelectedItem().(branchItem); ok {
-				return m, switchBranchCmd(m.runner, item.branch.Name)
+				return m, tea.Batch(
+					func() tea.Msg { return setAppStatusMsg("Switching branch...") },
+					switchBranchCmd(m.runner, item.branch.Name),
+				)
 			}
 		}
 		return m, nil
@@ -114,6 +170,8 @@ func (m Model) focusedListIsFiltering() bool {
 		return m.branches.SettingFilter()
 	case focusHistory:
 		return m.history.SettingFilter()
+	case focusStash:
+		return m.stashes.SettingFilter()
 	}
 	return false
 }
@@ -123,10 +181,15 @@ func (m Model) updateFocusedList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.focus {
 	case focusFiles:
 		m.files, cmd = m.files.Update(msg)
+		if dcmd := (&m).ensureDiffForSelectedFile(); dcmd != nil {
+			cmd = tea.Batch(cmd, dcmd)
+		}
 	case focusBranches:
 		m.branches, cmd = m.branches.Update(msg)
 	case focusHistory:
 		m.history, cmd = m.history.Update(msg)
+	case focusStash:
+		m.stashes, cmd = m.stashes.Update(msg)
 	case focusDiff:
 		m.diff.vp, cmd = m.diff.vp.Update(msg)
 	}
@@ -139,7 +202,10 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		path := m.pendingDiscardPath
 		m.pendingDiscardPath = ""
 		if msg.String() == "y" {
-			return m, resetCmd(m.runner, path)
+			return m, tea.Batch(
+				func() tea.Msg { return setAppStatusMsg("Discarding...") },
+				resetCmd(m.runner, path),
+			)
 		}
 		return m, nil
 	}

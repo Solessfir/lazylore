@@ -90,13 +90,19 @@ func TestStatusToItems_StagedThenUnstaged(t *testing.T) {
 }
 
 func TestBranchItem_TitleMarksCurrent(t *testing.T) {
+	// Title() now returns structural text; actual colors/* /✓ are applied
+	// at render time in the delegate to match lazygit.
 	current := branchItem{branch: lore.Branch{Name: "main", Current: true}}
-	if current.Title() != "* main" {
-		t.Fatalf("Title() = %q, want %q", current.Title(), "* main")
+	if current.Title() != "main" {
+		t.Fatalf("Title() = %q, want %q", current.Title(), "main")
 	}
 	other := branchItem{branch: lore.Branch{Name: "dev", Current: false}}
-	if other.Title() != "  dev" {
-		t.Fatalf("Title() = %q, want %q", other.Title(), "  dev")
+	if other.Title() != "dev" {
+		t.Fatalf("Title() = %q, want %q", other.Title(), "dev")
+	}
+	remote := branchItem{branch: lore.Branch{Name: "origin/main", Current: false, Remote: true}}
+	if remote.Title() != "origin/main" {
+		t.Fatalf("Title() = %q, want %q", remote.Title(), "origin/main")
 	}
 }
 

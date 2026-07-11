@@ -1,6 +1,10 @@
 package ui
 
-import "lazylore/internal/lore"
+import (
+	"time"
+
+	"lazylore/internal/lore"
+)
 
 type statusMsg struct {
 	status lore.Status
@@ -17,6 +21,11 @@ type historyMsg struct {
 	err       error
 }
 
+type stashesMsg struct {
+	stashes []lore.Stash
+	err     error
+}
+
 type diffMsg struct {
 	text string
 	err  error
@@ -26,3 +35,7 @@ type actionDoneMsg struct {
 	label string
 	err   error
 }
+
+type tickMsg time.Time
+
+type setAppStatusMsg string

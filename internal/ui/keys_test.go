@@ -106,10 +106,21 @@ func TestModel_YKeyConfirmsDiscardAndUnstagesThenResets(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd after confirming discard")
 	}
-	msg := cmd()
-	am, ok := msg.(actionDoneMsg)
+	c := cmd()
+	if b, ok := c.(tea.BatchMsg); ok && len(b) > 0 {
+		for _, item := range b {
+			if item != nil {
+				res := item()
+				if am, ok := res.(actionDoneMsg); ok {
+					c = am
+					break
+				}
+			}
+		}
+	}
+	am, ok := c.(actionDoneMsg)
 	if !ok {
-		t.Fatalf("msg = %#v, want actionDoneMsg", msg)
+		t.Fatalf("msg = %#v, want actionDoneMsg", c)
 	}
 	if am.err != nil {
 		t.Fatalf("unexpected error: %v", am.err)

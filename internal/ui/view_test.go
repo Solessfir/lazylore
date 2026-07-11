@@ -53,3 +53,48 @@ func TestRenderPanel_DifferentContentProducesSameSize(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderTitledPanel_TitleLivesInBorderNotContent(t *testing.T) {
+	// Titles must appear in the top border line (lazygit style), not as a
+	// separate interior row. This is the main visual fix vs original.
+	const w, h = 25, 6 // w,h here are the lipgloss target (inner) sizes
+	out := renderTitledPanel(false, w, h, "", "Files", "M foo.txt\nM bar.go")
+	lines := strings.Split(out, "\n")
+
+	// Outer dimensions must still be stable.
+	if len(lines) != h+borderHeight {
+		t.Fatalf("outer lines = %d, want %d", len(lines), h+borderHeight)
+	}
+	for _, ln := range lines {
+		if lipgloss.Width(ln) != w+borderWidth {
+			t.Fatalf("line width mismatch; got %d want %d", lipgloss.Width(ln), w+borderWidth)
+		}
+	}
+
+	top := lines[0]
+	if !strings.Contains(top, "Files") {
+		t.Fatalf("top border must contain title 'Files', got: %q", top)
+	}
+	// The title should be inside the border runes, not a content line.
+	if strings.HasPrefix(strings.TrimSpace(top), "Files") {
+		t.Fatalf("title should not be bare content; it must be embedded in border: %q", top)
+	}
+
+	// Second line should be actual content (first data row), not another title.
+	second := strings.TrimSpace(lines[1])
+	if strings.Contains(second, "Files") {
+		t.Fatalf("second line should be data, not contain title: %q", lines[1])
+	}
+}
+
+func TestRenderTitledPanel_StatusCompact(t *testing.T) {
+	out := renderTitledPanelForStatus(20, 1, "myrepo → main")
+	lines := strings.Split(out, "\n")
+	// status outer h = 1 (content) + 2 borders = 3
+	if len(lines) != 3 {
+		t.Fatalf("status lines = %d, want 3", len(lines))
+	}
+	if !strings.Contains(lines[0], "Status") {
+		t.Fatalf("status top border must contain 'Status': %q", lines[0])
+	}
+}

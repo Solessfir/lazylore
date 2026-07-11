@@ -10,6 +10,8 @@ type Branch struct {
 	Name    string
 	Current bool
 	Remote  bool
+	Latest  string
+	Created int64
 }
 
 // branchListEntryData mirrors LoreBranchListEntryEventData
@@ -18,6 +20,8 @@ type branchListEntryData struct {
 	Location  string `json:"location"` // "local" or "remote"
 	Name      string `json:"name"`
 	IsCurrent bool   `json:"isCurrent"`
+	Latest    string `json:"latest"`
+	Created   int64  `json:"created"`
 }
 
 // ParseBranchList reads `lore --json branch list` output: a
@@ -42,6 +46,8 @@ func ParseBranchList(output string) ([]Branch, error) {
 			Name:    data.Name,
 			Current: data.IsCurrent,
 			Remote:  data.Location == "remote",
+			Latest:  data.Latest,
+			Created: data.Created,
 		})
 	}
 	return branches, nil

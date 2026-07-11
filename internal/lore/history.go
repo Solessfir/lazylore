@@ -3,24 +3,27 @@ package lore
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Revision is one entry from `lore --json history`.
 type Revision struct {
 	Number  int
 	Message string
+	Hash    string
+	Author  string
 }
 
 // revisionHistoryEntryData mirrors LoreRevisionHistoryEntryEventData
 // (lore-revision/src/revision/history.rs) - only the field Revision uses.
 type revisionHistoryEntryData struct {
-	RevisionNumber int `json:"revisionNumber"`
+	RevisionNumber int    `json:"revisionNumber"`
+	Revision       string `json:"revision"`
 }
 
 // metadataEventData mirrors LoreMetadataEventData (lore-revision/src/event.rs):
 // a key plus a tagged value ({"tagName":"string","data":...},
-// {"tagName":"numeric","data":...}, etc.) - only "message" (a string value)
-// matters for Revision.
+// {"tagName":"numeric","data":...}, etc.) - only "message" and "created-by"/"committed-by" for author.
 type metadataEventData struct {
 	Key   string `json:"key"`
 	Value struct {
@@ -59,7 +62,7 @@ func ParseHistory(output string) ([]Revision, error) {
 			if err := json.Unmarshal(e.Data, &data); err != nil {
 				return nil, fmt.Errorf("parsing revisionHistoryEntry event: %w", err)
 			}
-			current = &Revision{Number: data.RevisionNumber}
+			current = &Revision{Number: data.RevisionNumber, Hash: data.Revision}
 
 		case "metadata":
 			if current == nil {
@@ -69,14 +72,26 @@ func ParseHistory(output string) ([]Revision, error) {
 			if err := json.Unmarshal(e.Data, &data); err != nil {
 				return nil, fmt.Errorf("parsing metadata event: %w", err)
 			}
-			if data.Key != "message" {
-				continue
+			switch data.Key {
+			case "message":
+				var message string
+				if err := json.Unmarshal(data.Value.Data, &message); err != nil {
+					return nil, fmt.Errorf("parsing metadata message value: %w", err)
+				}
+				current.Message = message
+			case "created-by", "committed-by":
+				raw := string(data.Value.Data)
+				author := strings.Trim(raw, `"`)
+				if author == "" || strings.HasPrefix(author, "{") {
+					var s string
+					if json.Unmarshal([]byte(raw), &s) == nil && s != "" {
+						author = s
+					}
+				}
+				if author != "" {
+					current.Author = author
+				}
 			}
-			var message string
-			if err := json.Unmarshal(data.Value.Data, &message); err != nil {
-				return nil, fmt.Errorf("parsing metadata message value: %w", err)
-			}
-			current.Message = message
 		}
 	}
 	flush()

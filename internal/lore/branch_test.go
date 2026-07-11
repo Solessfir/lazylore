@@ -34,8 +34,8 @@ func TestParseBranchList_Single(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []lore.Branch{
-		{Name: "main", Current: true, Remote: false},
-		{Name: "main", Current: false, Remote: true},
+		{Name: "main", Current: true, Remote: false, Latest: "0000000000000000000000000000000000000000000000000000000000000000", Created: 1783771246964},
+		{Name: "main", Current: false, Remote: true, Latest: "0000000000000000000000000000000000000000000000000000000000000000", Created: 1783771246},
 	}
 	if len(branches) != len(want) {
 		t.Fatalf("branches = %+v, want %+v", branches, want)
@@ -53,8 +53,8 @@ func TestParseBranchList_Multi(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []lore.Branch{
-		{Name: "main", Current: false, Remote: false},
-		{Name: "my-first-branch", Current: true, Remote: false},
+		{Name: "main", Current: false, Remote: false, Latest: "b3e648f10d02c6162433bfdb49c06012027d19bc586560647d0bf2ff6278c195", Created: 1783602421644},
+		{Name: "my-first-branch", Current: true, Remote: false, Latest: "45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2", Created: 1783602434325},
 	}
 	if len(branches) != len(want) {
 		t.Fatalf("branches = %+v, want %+v", branches, want)

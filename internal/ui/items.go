@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -80,6 +81,10 @@ func (d fileDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
 // list's own content width (m.Width(), captured at Render time) - without
 // it the background fill isn't bounded to this panel at all and bleeds
 // across the rest of the terminal row, past the panel's own border.
+//
+// We use the full width for the highlight (so it reaches near the right
+// border like lazygit), while individual item text may have a small right
+// gutter for breathing room.
 func selectedRowStyle(width int) lipgloss.Style {
 	return lipgloss.NewStyle().Background(selectedBg).Bold(true).Width(width)
 }
@@ -92,22 +97,61 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	indent := strings.Repeat("  ", fi.depth)
 	selected := d.focused && index == m.Index()
 
-	var line string
+	if !selected {
+		if fi.isDir {
+			arrow := "▼"
+			if fi.collapsed {
+				arrow = "▶"
+			}
+			fmt.Fprint(w, indent+arrow+" "+fi.baseName())
+			return
+		}
+		// File, not selected: apply per-part colors (status red/green, name color for staged)
+		statusStyle := lipgloss.NewStyle().Foreground(fileStatusColor(fi.staged))
+		nameStyle := fileNameStyle(fi.staged)
+		line := indent + statusStyle.Render(string(fi.change.Status)) + " " + nameStyle.Render(fi.baseName())
+		fmt.Fprint(w, line)
+		return
+	}
+
+	// Selected row: we must include Background on the colored segments so the
+	// blue selection shows behind file names (and status letters). Plain
+	// concatenation of pre-styled segments + outer bg fails because inner
+	// .Render() calls emit resets that kill the background.
+	rowWidth := m.Width()
+
 	if fi.isDir {
 		arrow := "▼"
 		if fi.collapsed {
 			arrow = "▶"
 		}
-		line = indent + arrow + " " + fi.baseName()
-	} else {
-		statusStyle := lipgloss.NewStyle().Foreground(fileStatusColor(fi.staged))
-		line = indent + statusStyle.Render(string(fi.change.Status)) + " " + fileNameStyle(fi.staged).Render(fi.baseName())
+		display := indent + arrow + " " + fi.baseName()
+		fmt.Fprint(w, selectedRowStyle(rowWidth).Render(display))
+		return
 	}
 
-	if selected {
-		line = selectedRowStyle(m.Width()).Render(line)
-	}
-	fmt.Fprint(w, line)
+	// Selected file
+	statColor := fileStatusColor(fi.staged)
+	statStyle := lipgloss.NewStyle().
+		Foreground(statColor).
+		Background(selectedBg).
+		Bold(true)
+
+	nameStyle := fileNameStyle(fi.staged).
+		Background(selectedBg).
+		Bold(true)
+
+	// The separator space must also carry the background, otherwise you get
+	// "A{no-bg space}Filename" under selection.
+	selSpace := lipgloss.NewStyle().Background(selectedBg).Bold(true)
+
+	colored := selSpace.Render(indent) +
+		statStyle.Render(string(fi.change.Status)) +
+		selSpace.Render(" ") +
+		nameStyle.Render(fi.baseName())
+
+	// selectedRowStyle ensures full-width background fill (including gutter area)
+	fmt.Fprint(w, selectedRowStyle(rowWidth).Render(colored))
 }
 
 // statusToItems flattens a Status's changed files into a directory tree
@@ -135,18 +179,12 @@ type branchItem struct {
 }
 
 func (i branchItem) Title() string {
-	if i.branch.Current {
-		return "* " + i.branch.Name
-	}
-	return "  " + i.branch.Name
+	// Structural title for filtering / list model. Visual rendering
+	// (recency, colors, * / ✓ ) happens in compactTitleDelegate.
+	return i.branch.Name
 }
 
-func (i branchItem) Description() string {
-	if i.branch.Remote {
-		return "remote"
-	}
-	return "local"
-}
+func (i branchItem) Description() string { return "" }
 
 func (i branchItem) FilterValue() string { return i.branch.Name }
 
@@ -158,11 +196,47 @@ func branchesToItems(branches []lore.Branch) []list.Item {
 	return items
 }
 
+// branchRecency returns a short recency string like "3d" or "  " for display,
+// matching lazygit style. "3d" here represents age of the branch tip.
+func branchRecency(b lore.Branch) string {
+	if b.Current {
+		return "*"
+	}
+	if b.Created == 0 {
+		return "  "
+	}
+	// created can be ms or seconds; normalize
+	var t time.Time
+	if b.Created > 1e12 { // ms
+		t = time.Unix(0, b.Created*int64(time.Millisecond))
+	} else {
+		t = time.Unix(b.Created, 0)
+	}
+	age := time.Since(t)
+	if age < 0 {
+		age = 0
+	}
+	if d := int(age.Hours() / 24); d > 0 {
+		if d < 10 {
+			return fmt.Sprintf(" %dd", d)
+		}
+		return fmt.Sprintf("%dd", d)
+	}
+	if h := int(age.Hours()); h > 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return " 1h"
+}
+
 type revisionItem struct {
 	revision lore.Revision
 }
 
 func (i revisionItem) Title() string {
+	// structural
+	if i.revision.Hash != "" {
+		return fmt.Sprintf("%s %s", i.revision.Hash, i.revision.Message)
+	}
 	return fmt.Sprintf("%d  %s", i.revision.Number, i.revision.Message)
 }
 
@@ -176,4 +250,165 @@ func historyToItems(revisions []lore.Revision) []list.Item {
 		items = append(items, revisionItem{revision: rv})
 	}
 	return items
+}
+
+type stashItem struct {
+	stash lore.Stash
+}
+
+func (i stashItem) Title() string {
+	return fmt.Sprintf("%d: %s", i.stash.Index, i.stash.Message)
+}
+
+func (i stashItem) Description() string { return "" }
+
+func (i stashItem) FilterValue() string { return i.Title() }
+
+func stashesToItems(stashes []lore.Stash) []list.Item {
+	items := make([]list.Item, 0, len(stashes))
+	for _, s := range stashes {
+		items = append(items, stashItem{stash: s})
+	}
+	return items
+}
+
+// compactTitleDelegate is a minimal ItemDelegate for single-line branch/history
+// lists. It renders only the Title() on one row (Description is ignored/empty).
+// Selection highlight is a full-width background only on the focused panel,
+// matching the fileDelegate and lazygit's focused vs inactive selection.
+type compactTitleDelegate struct {
+	focused bool
+	width   int // content width for bounding the bg highlight
+}
+
+func (d compactTitleDelegate) Height() int                         { return 1 }
+func (d compactTitleDelegate) Spacing() int                        { return 0 }
+func (d compactTitleDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
+
+func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	selected := d.focused && index == m.Index()
+
+	// Breathing room inside the panel (1 col right gutter for text).
+	contentW := d.width
+	if contentW > 1 {
+		contentW--
+	}
+
+	// Special rendering for branches to match lazygit:
+	// Current: {green}*{green}{white}main{white}{green}✓{green}
+	// Title split (Local/Remotes) handled at panel title level.
+	if bi, ok := listItem.(branchItem); ok {
+		name := bi.branch.Name
+
+		green := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
+		white := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+		cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+		if selected {
+			green = green.Background(selectedBg).Bold(true)
+			white = white.Background(selectedBg)
+			cyan = cyan.Background(selectedBg)
+		}
+
+		var display string
+		isDefault := !bi.branch.Remote && (name == "main" || name == "master")
+		if bi.branch.Current {
+			display = green.Render("* ") + white.Render(name)
+			if isDefault {
+				display += green.Render(" ✓")
+			}
+		} else {
+			rec := branchRecency(bi.branch)
+			display = cyan.Render(rec+" ") + white.Render(name)
+			if isDefault {
+				display += green.Render(" ✓")
+			}
+		}
+
+		if selected {
+			// Full selection background (blue) across the row for the entire
+			// branch line, including the cyan recency part. Matches the
+			// fileDelegate pattern to ensure "full ... filled selection".
+			fmt.Fprint(w, selectedRowStyle(d.width).Render(display))
+		} else {
+			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).Render(display))
+		}
+		return
+	}
+
+	// Special for history/revision to match lazygit:
+	// green short hash | purple author ○ | message
+	if ri, ok := listItem.(revisionItem); ok {
+		hash := ri.revision.Hash
+		if hash == "" {
+			hash = fmt.Sprintf("%d", ri.revision.Number)
+		} else if len(hash) > 8 {
+			hash = hash[:8]
+		}
+		author := ri.revision.Author
+		if author == "" {
+			author = "unknown"
+		}
+		if len(author) > 10 {
+			author = author[:10]
+		}
+		msg := ri.revision.Message
+
+		green := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+		purple := lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple-ish
+		msgStyle := lipgloss.NewStyle()
+		spaceStyle := lipgloss.NewStyle()
+		if selected {
+			green = green.Background(selectedBg).Bold(true)
+			purple = purple.Background(selectedBg)
+			msgStyle = msgStyle.Background(selectedBg)
+			spaceStyle = spaceStyle.Background(selectedBg)
+		}
+
+		// Build with explicit styles on all parts (including spaces and msg)
+		// so the blue selection background fills the entire row, matching
+		// the fix for Files and Branches.
+		display := green.Render(hash) +
+			spaceStyle.Render(" ") +
+			purple.Render(author+" ○") +
+			spaceStyle.Render(" ") +
+			msgStyle.Render(msg)
+
+		if selected {
+			fmt.Fprint(w, selectedRowStyle(d.width).Render(display))
+		} else {
+			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).Render(display))
+		}
+		return
+	}
+
+	// Stash items (for the Stash panel below History, matching lazygit layout)
+	if si, ok := listItem.(stashItem); ok {
+		idx := fmt.Sprintf("%d", si.stash.Index)
+		msg := si.stash.Message
+		green := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+		white := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+		if selected {
+			green = green.Background(selectedBg).Bold(true)
+			white = white.Background(selectedBg)
+		}
+		display := green.Render(idx+": ") + white.Render(msg)
+
+		if selected {
+			fmt.Fprint(w, selectedRowStyle(d.width).Render(display))
+		} else {
+			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).Render(display))
+		}
+		return
+	}
+
+	// Generic (other): use Title()
+	title := ""
+	if it, ok := listItem.(interface{ Title() string }); ok {
+		title = it.Title()
+	}
+	if selected {
+		fmt.Fprint(w, selectedRowStyle(d.width).Render(title))
+	} else {
+		fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).Render(title))
+	}
 }
