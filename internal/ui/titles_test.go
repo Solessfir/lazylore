@@ -30,3 +30,14 @@ func TestWithBottomCount_PreservesBorderColor(t *testing.T) {
 		t.Fatalf("bottom border missing count: %q", bottom)
 	}
 }
+
+func TestWithBottomCount_PadsBothSidesOfCount(t *testing.T) {
+	p := renderTitledPanel(false, 20, 3, "1", "Files", "M a.go\nM b.go\nM c.go")
+	p = withBottomCount(p, "1 of 34", false)
+	lines := strings.Split(p, "\n")
+	bottom := lines[len(lines)-1]
+
+	if !strings.HasSuffix(bottom, "1 of 34─╯") {
+		t.Fatalf("bottom border must have a ─ between the count and the corner; got %q", bottom)
+	}
+}

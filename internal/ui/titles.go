@@ -210,16 +210,16 @@ func withBottomCount(rendered, count string, focused bool) string {
 	}
 
 	countW := lipgloss.Width(count)
-	// Right-align count in the bottom border, with one extra `-` padding
-	// immediately to the left of the count (so count doesn't touch the preceding dashes):
-	// ╰────────────-6 of 12╯
+	// Right-align count in the bottom border, with one `─` of padding on
+	// both sides so it doesn't touch the preceding dashes or the corner:
+	// ╰────────────-6 of 12─╯
 	inner := w - 2
-	leftDashesLen := inner - countW - 1
+	leftDashesLen := inner - countW - 2
 	if leftDashesLen < 0 {
 		leftDashesLen = 0
 	}
 	build := func(dashes int) string {
-		return frameStyle.Render("╰"+strings.Repeat("─", dashes)+"─") + frameStyle.Render(count) + frameStyle.Render("╯")
+		return frameStyle.Render("╰"+strings.Repeat("─", dashes)+"─") + frameStyle.Render(count) + frameStyle.Render("─╯")
 	}
 	bottom := build(leftDashesLen)
 	// If too short (shouldn't happen), pad on right before ╯
