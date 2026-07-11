@@ -61,6 +61,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case " ":
 		if m.focus == focusFiles {
 			if item, ok := m.files.SelectedItem().(fileItem); ok {
+				if item.isDir {
+					return m, m.toggleDirCollapse(item.path)
+				}
 				if item.staged {
 					return m, unstageCmd(m.runner, item.change.Path)
 				}
@@ -71,7 +74,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "d":
 		if m.focus == focusFiles {
-			if item, ok := m.files.SelectedItem().(fileItem); ok {
+			if item, ok := m.files.SelectedItem().(fileItem); ok && !item.isDir {
 				m.prompt = promptConfirmDiscard
 				m.pendingDiscardPath = item.change.Path
 			}
@@ -82,6 +85,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch m.focus {
 		case focusFiles:
 			if item, ok := m.files.SelectedItem().(fileItem); ok {
+				if item.isDir {
+					return m, m.toggleDirCollapse(item.path)
+				}
 				return m, loadDiffCmd(m.runner, item.change.Path)
 			}
 		case focusBranches:

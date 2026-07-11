@@ -11,7 +11,7 @@ import (
 )
 
 func TestFileItem_FilterValueIsThePath(t *testing.T) {
-	item := fileItem{change: lore.FileChange{Status: 'M', Path: "hello.txt"}, staged: false}
+	item := fileItem{path: "hello.txt", change: lore.FileChange{Status: 'M', Path: "hello.txt"}, staged: false}
 	if item.FilterValue() != "hello.txt" {
 		t.Fatalf("FilterValue() = %q, want %q", item.FilterValue(), "hello.txt")
 	}
@@ -40,7 +40,7 @@ func TestFileNameStyle_StagedIsGreenUnstagedIsUncolored(t *testing.T) {
 }
 
 func TestFileDelegate_RenderColorsStatusLetterButNotUnstagedName(t *testing.T) {
-	items := []list.Item{fileItem{change: lore.FileChange{Status: 'M', Path: "hello.txt"}, staged: false}}
+	items := []list.Item{fileItem{path: "hello.txt", change: lore.FileChange{Status: 'M', Path: "hello.txt"}, staged: false}}
 	l := list.New(items, fileDelegate{focused: false}, 40, 5)
 
 	var buf bytes.Buffer
@@ -57,7 +57,7 @@ func TestStatusToItems_StagedThenUnstaged(t *testing.T) {
 		Staged:   []lore.FileChange{{Status: 'A', Path: "a.txt"}},
 		Unstaged: []lore.FileChange{{Status: 'M', Path: "b.txt"}},
 	}
-	items := statusToItems(s)
+	items := statusToItems(s, nil)
 	if len(items) != 2 {
 		t.Fatalf("items = %+v, want 2 entries", items)
 	}

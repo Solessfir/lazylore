@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -36,17 +37,33 @@ func fileNameStyle(staged bool) lipgloss.Style {
 	return lipgloss.NewStyle()
 }
 
+// fileItem is one row in the Files panel: either a directory node (isDir,
+// toggled open/closed with Enter/Space) or a file leaf carrying the
+// FileChange it represents - one tree, built fresh from Status on every
+// refresh by statusToItems, with collapse state carried separately on
+// Model so it survives a refresh.
 type fileItem struct {
-	change lore.FileChange
-	staged bool
+	path      string
+	isDir     bool
+	depth     int
+	change    lore.FileChange
+	staged    bool
+	collapsed bool // only meaningful when isDir
 }
 
-func (i fileItem) FilterValue() string { return i.change.Path }
+func (i fileItem) FilterValue() string { return i.path }
+
+func (i fileItem) baseName() string {
+	if idx := strings.LastIndex(i.path, "/"); idx >= 0 {
+		return i.path[idx+1:]
+	}
+	return i.path
+}
 
 // fileDelegate renders Files list items itself, rather than going through
 // list.DefaultDelegate's Title()/Description() two-line convention - lore's
 // per-file status is conveyed by color (see fileStatusColor/fileNameStyle),
-// not a text label, and each file is a single line.
+// not a text label, and each row (file or directory) is a single line.
 type fileDelegate struct {
 	focused bool
 }
@@ -60,25 +77,48 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	if !ok {
 		return
 	}
-	line := fmt.Sprintf("%c %s", fi.change.Status, fi.change.Path)
+	indent := strings.Repeat("  ", fi.depth)
+	selected := d.focused && index == m.Index()
 
-	if d.focused && index == m.Index() {
-		selectedStyle := lipgloss.NewStyle().Background(selectedBg).Foreground(selectedFg).Bold(true)
-		fmt.Fprint(w, selectedStyle.Render(line))
+	if fi.isDir {
+		arrow := "▼"
+		if fi.collapsed {
+			arrow = "▶"
+		}
+		line := indent + arrow + " " + fi.baseName()
+		if selected {
+			line = lipgloss.NewStyle().Background(selectedBg).Foreground(selectedFg).Bold(true).Render(line)
+		}
+		fmt.Fprint(w, line)
+		return
+	}
+
+	if selected {
+		line := fmt.Sprintf("%s%c %s", indent, fi.change.Status, fi.baseName())
+		fmt.Fprint(w, lipgloss.NewStyle().Background(selectedBg).Foreground(selectedFg).Bold(true).Render(line))
 		return
 	}
 
 	statusStyle := lipgloss.NewStyle().Foreground(fileStatusColor(fi.staged))
-	fmt.Fprint(w, statusStyle.Render(string(fi.change.Status))+" "+fileNameStyle(fi.staged).Render(fi.change.Path))
+	fmt.Fprint(w, indent+statusStyle.Render(string(fi.change.Status))+" "+fileNameStyle(fi.staged).Render(fi.baseName()))
 }
 
-func statusToItems(s lore.Status) []list.Item {
-	items := make([]list.Item, 0, len(s.Staged)+len(s.Unstaged))
-	for _, c := range s.Staged {
-		items = append(items, fileItem{change: c, staged: true})
-	}
-	for _, c := range s.Unstaged {
-		items = append(items, fileItem{change: c, staged: false})
+// statusToItems flattens a Status's changed files into a directory tree
+// (see filetree.go), respecting which directories are currently collapsed.
+func statusToItems(s lore.Status, collapsedDirs map[string]bool) []list.Item {
+	tree := buildFileTree(s)
+	rows := flattenFileTree(tree, collapsedDirs)
+
+	items := make([]list.Item, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, fileItem{
+			path:      row.node.path,
+			isDir:     row.node.isDir,
+			depth:     row.depth,
+			change:    row.node.change,
+			staged:    row.node.staged,
+			collapsed: collapsedDirs[row.node.path],
+		})
 	}
 	return items
 }

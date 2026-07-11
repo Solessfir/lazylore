@@ -25,8 +25,9 @@ type Model struct {
 	input              textinput.Model
 	pendingDiscardPath string
 
-	status lore.Status
-	err    error
+	status        lore.Status
+	collapsedDirs map[string]bool // Files-panel tree: which directory paths are closed
+	err           error
 
 	width, height int
 
@@ -105,10 +106,22 @@ func (m *Model) syncFocusDelegates() {
 	m.history.SetDelegate(newListDelegate(m.focus == focusHistory))
 }
 
+// toggleDirCollapse flips the open/closed state of a Files-panel directory
+// and rebuilds the list from the already-known Status - no need to re-fetch
+// from lore, collapsing is purely a display concern.
+func (m *Model) toggleDirCollapse(path string) tea.Cmd {
+	if m.collapsedDirs == nil {
+		m.collapsedDirs = map[string]bool{}
+	}
+	m.collapsedDirs[path] = !m.collapsedDirs[path]
+	return m.files.SetItems(statusToItems(m.status, m.collapsedDirs))
+}
+
 func NewModel(r lore.Runner, repoName string) Model {
 	return Model{
-		runner:   r,
-		repoName: repoName,
+		runner:        r,
+		repoName:      repoName,
+		collapsedDirs: map[string]bool{},
 		// focusFiles is the initial focus, below.
 		files:    newPanelList(fileDelegate{focused: true}),
 		branches: newPanelList(newListDelegate(false)),
@@ -217,7 +230,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.status = msg.status
-		if cmd := m.files.SetItems(statusToItems(msg.status)); cmd != nil {
+		if cmd := m.files.SetItems(statusToItems(msg.status, m.collapsedDirs)); cmd != nil {
 			return m, cmd
 		}
 		return m, nil

@@ -144,3 +144,82 @@ func TestModel_EscCancelsDiscardPromptWithoutRunnerCalls(t *testing.T) {
 		t.Fatalf("expected no runner calls after cancelling, got %+v", fake.Calls)
 	}
 }
+
+func TestModel_EnterOnDirectoryTogglesCollapseInsteadOfLoadingDiff(t *testing.T) {
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "test-repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})
+	m2 := updated.(Model)
+
+	item, ok := m2.files.SelectedItem().(fileItem)
+	if !ok || !item.isDir || item.path != "src" {
+		t.Fatalf("precondition failed: selected item = %+v, want the 'src' directory", item)
+	}
+	if item.collapsed {
+		t.Fatal("precondition failed: 'src' should start expanded")
+	}
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m3 := updated.(Model)
+
+	if len(fake.Calls) != 0 {
+		t.Fatalf("Enter on a directory should not dispatch any runner call, got %+v", fake.Calls)
+	}
+	item2, ok := m3.files.SelectedItem().(fileItem)
+	if !ok || !item2.isDir || !item2.collapsed {
+		t.Fatalf("expected 'src' to be collapsed after Enter, got %+v", item2)
+	}
+}
+
+func TestModel_SpaceOnDirectoryTogglesCollapseInsteadOfStaging(t *testing.T) {
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "test-repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m3 := updated.(Model)
+
+	if len(fake.Calls) != 0 {
+		t.Fatalf("Space on a directory should not dispatch any runner call, got %+v", fake.Calls)
+	}
+	item, ok := m3.files.SelectedItem().(fileItem)
+	if !ok || !item.isDir || !item.collapsed {
+		t.Fatalf("expected 'src' to be collapsed after Space, got %+v", item)
+	}
+}
+
+func TestModel_DKeyOnDirectoryDoesNothing(t *testing.T) {
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "test-repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m3 := updated.(Model)
+
+	if m3.prompt != promptNone {
+		t.Fatalf("'d' on a directory should not open the discard prompt, got prompt = %v", m3.prompt)
+	}
+}
+
+func TestModel_CollapsedDirectoryHidesItsFiles(t *testing.T) {
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "test-repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{
+		{Status: 'M', Path: "src/a.go"},
+		{Status: 'M', Path: "src/b.go"},
+	}}})
+	m2 := updated.(Model)
+
+	if len(m2.files.Items()) != 3 { // src/, a.go, b.go
+		t.Fatalf("expanded items = %+v, want 3 rows", m2.files.Items())
+	}
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m3 := updated.(Model)
+
+	if len(m3.files.Items()) != 1 {
+		t.Fatalf("collapsed items = %+v, want just the 'src' row", m3.files.Items())
+	}
+}
