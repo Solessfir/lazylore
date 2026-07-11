@@ -148,8 +148,34 @@ func TestRevisionItem_TitleShowsNumberAndMessage(t *testing.T) {
 
 func TestHistoryToItems_PreservesOrder(t *testing.T) {
 	revisions := []lore.Revision{{Number: 2, Message: "second"}, {Number: 1, Message: "first"}}
-	items := historyToItems(revisions)
+	items := historyToItems(revisions, 0, false)
 	if len(items) != 2 {
 		t.Fatalf("items = %+v, want 2 entries", items)
+	}
+}
+
+func TestHistoryToItems_MarksRevisionsNewerThanRemoteAsUnpushed(t *testing.T) {
+	revisions := []lore.Revision{
+		{Number: 3, Message: "local only"},
+		{Number: 2, Message: "pushed"},
+		{Number: 1, Message: "pushed too"},
+	}
+	items := historyToItems(revisions, 2, true)
+	if ri := items[0].(revisionItem); !ri.unpushed {
+		t.Fatalf("revision 3 (> remote 2) should be unpushed: %+v", ri)
+	}
+	if ri := items[1].(revisionItem); ri.unpushed {
+		t.Fatalf("revision 2 (== remote 2) should be pushed: %+v", ri)
+	}
+	if ri := items[2].(revisionItem); ri.unpushed {
+		t.Fatalf("revision 1 (< remote 2) should be pushed: %+v", ri)
+	}
+}
+
+func TestHistoryToItems_NoRemoteInfoMeansNothingMarkedUnpushed(t *testing.T) {
+	revisions := []lore.Revision{{Number: 5, Message: "who knows"}}
+	items := historyToItems(revisions, 0, false)
+	if ri := items[0].(revisionItem); ri.unpushed {
+		t.Fatalf("without remote info nothing should be marked unpushed: %+v", ri)
 	}
 }

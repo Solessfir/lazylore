@@ -11,6 +11,31 @@ import (
 	"lazylore/internal/lore"
 )
 
+func TestModel_HistoryRecolorsWhenStatusArrivesAfterHistory(t *testing.T) {
+	// Regression: statusMsg and historyMsg load independently (Init()
+	// batches both) with no ordering guarantee. Unpushed coloring depends
+	// on data from BOTH - if historyMsg happens to land first, the initial
+	// render has no remote info yet (nothing marked unpushed); statusMsg
+	// landing afterward must still recolor the already-rendered list, not
+	// wait for a future historyMsg that may never come.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{{Number: 2, Hash: "abc", Message: "local only"}}})
+	m2 := updated.(Model)
+	item0, _ := m2.history.Items()[0].(revisionItem)
+	if item0.unpushed {
+		t.Fatalf("before status arrives, nothing should be marked unpushed yet: %+v", item0)
+	}
+
+	updated, _ = m2.Update(statusMsg{status: lore.Status{
+		Branch: "main", HasRemoteInfo: true, RemoteRevisionNumber: 1,
+	}})
+	m3 := updated.(Model)
+	item0, ok := m3.history.Items()[0].(revisionItem)
+	if !ok || !item0.unpushed {
+		t.Fatalf("after status arrives (remote at revision 1, this revision is 2), it must be marked unpushed: %+v", item0)
+	}
+}
+
 func TestModel_MainPanelTitle_MatchesLazygitPerContext(t *testing.T) {
 	// Ground truth: files_controller.go's renderWorkingTreeDiff (Unstaged/
 	// Staged changes), branches_controller.go's LogTitle ("Log"),

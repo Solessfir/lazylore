@@ -55,6 +55,53 @@ func TestParseStatus_Clean(t *testing.T) {
 	}
 }
 
+func TestParseStatus_RealSusRepoAheadFixture(t *testing.T) {
+	// Captured verbatim from `lore.exe --json status --scan` against the
+	// real Sus repo (local at revision 2, remote still at revision 1 - lore
+	// push's own message on this exact repo confirmed "Local branch is 1
+	// revision(s) ahead of remote"), used to verify the ahead-count bug
+	// report was actually a real 1-revision gap, not a lazylore miscalc.
+	const out = `{"tagName":"repositoryStatusRevision","data":{"repository":"019f492871097de0b06e0e77e1119e0d","branch":"e726318bbc3fd75ac8733a7e030cc35b","branchName":"main","revision":"f1044a02cbb3684b4db203c82e8d3aaf3294f67a4b9a29a7d8f684eade1c485f","revisionNumber":2,"revisionStaged":"c22a72bd954a1baaf8e7b7b232b38ca612033b9395f40d28fede6249b688a0f5","revisionMerged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMergedParentBranch":"0000000000000000000000000000000000000000000000000000000000000000","revisionLocal":"f1044a02cbb3684b4db203c82e8d3aaf3294f67a4b9a29a7d8f684eade1c485f","revisionLocalNumber":2,"revisionRemote":"f913ade57f2b133acaf74cfefa7282332238e12ff17ccb7213c1182d28214ce5","revisionRemoteNumber":1,"isLocalAhead":1,"isRemoteAhead":0,"remoteAvailable":1,"remoteAuthorized":1,"remoteBranchExist":1}}
+` + jsonCompleteSuccess
+	s, err := lore.ParseStatus(out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.AheadCount != 1 || s.BehindCount != 0 {
+		t.Fatalf("AheadCount/BehindCount = %d/%d, want 1/0", s.AheadCount, s.BehindCount)
+	}
+	if !s.HasRemoteInfo || s.RemoteRevisionNumber != 1 {
+		t.Fatalf("HasRemoteInfo/RemoteRevisionNumber = %v/%d, want true/1", s.HasRemoteInfo, s.RemoteRevisionNumber)
+	}
+}
+
+func TestParseStatus_RemoteRevisionNumberSetEvenWhenBranchNeverPushed(t *testing.T) {
+	// remoteBranchExist:0 correctly yields RemoteRevisionNumber:0 - every
+	// local revision (number >= 1) is then "newer than remote", which is
+	// exactly correct: nothing has ever reached the remote.
+	out := `{"tagName":"repositoryStatusRevision","data":{"repository":"r","branch":"b","branchName":"main","revision":"h","revisionNumber":3,"revisionStaged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMerged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMergedParentBranch":"0000000000000000000000000000000000000000000000000000000000000000","revisionLocal":"h","revisionLocalNumber":3,"revisionRemote":"0000000000000000000000000000000000000000000000000000000000000000","revisionRemoteNumber":0,"isLocalAhead":0,"isRemoteAhead":0,"remoteAvailable":1,"remoteAuthorized":1,"remoteBranchExist":0}}
+` + jsonCompleteSuccess
+	s, err := lore.ParseStatus(out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !s.HasRemoteInfo || s.RemoteRevisionNumber != 0 {
+		t.Fatalf("HasRemoteInfo/RemoteRevisionNumber = %v/%d, want true/0", s.HasRemoteInfo, s.RemoteRevisionNumber)
+	}
+}
+
+func TestParseStatus_NoRemoteInfoWhenUnavailable(t *testing.T) {
+	out := `{"tagName":"repositoryStatusRevision","data":{"repository":"r","branch":"b","branchName":"main","revision":"h","revisionNumber":3,"revisionStaged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMerged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMergedParentBranch":"0000000000000000000000000000000000000000000000000000000000000000","revisionLocal":"h","revisionLocalNumber":3,"revisionRemote":"0000000000000000000000000000000000000000000000000000000000000000","revisionRemoteNumber":0,"isLocalAhead":0,"isRemoteAhead":0,"remoteAvailable":0,"remoteAuthorized":0,"remoteBranchExist":0}}
+` + jsonCompleteSuccess
+	s, err := lore.ParseStatus(out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.HasRemoteInfo {
+		t.Fatalf("HasRemoteInfo = true, want false when remote is unavailable (offline)")
+	}
+}
+
 func TestParseStatus_AheadOnly(t *testing.T) {
 	out := `{"tagName":"repositoryStatusRevision","data":{"repository":"r","branch":"b","branchName":"main","revision":"h","revisionNumber":7,"revisionStaged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMerged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMergedParentBranch":"0000000000000000000000000000000000000000000000000000000000000000","revisionLocal":"h","revisionLocalNumber":7,"revisionRemote":"r2","revisionRemoteNumber":4,"isLocalAhead":1,"isRemoteAhead":0,"remoteAvailable":1,"remoteAuthorized":1,"remoteBranchExist":1}}
 ` + jsonCompleteSuccess

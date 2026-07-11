@@ -55,6 +55,7 @@ type Model struct {
 	selectMode           bool   // mouse capture dropped so the terminal can select text (mirrors lazyp4)
 
 	status        lore.Status
+	revisions     []lore.Revision      // last-loaded History list; kept so statusMsg (which can arrive before or after historyMsg) can recompute unpushed coloring on its own
 	collapsedDirs map[string]bool      // Files-panel tree: which directory paths are closed
 	locks         map[string]lore.Lock // path -> lock, for files currently shown in the Files panel
 	err           error
@@ -494,6 +495,20 @@ func (m *Model) recomputePanelHeights() {
 	m.diffHeight = max(0, diffOuter-borderHeight)
 }
 
+// rebuildHistoryItems recomputes the History list's items (including
+// unpushed/pushed hash coloring) from the model's last-known revisions and
+// status. Called from both statusMsg and historyMsg handlers since either
+// can determine a row's color and they load independently - whichever
+// arrives second must still leave the list correct.
+func (m *Model) rebuildHistoryItems() tea.Cmd {
+	items := historyToItems(m.revisions, m.status.RemoteRevisionNumber, m.status.HasRemoteInfo)
+	cmd := m.history.SetItems(items)
+	m.historyTotal = len(items)
+	m.history.SetShowStatusBar(false)
+	m.history.SetShowPagination(false)
+	return cmd
+}
+
 // mainPanelTitle returns the shared main panel's title for whatever's
 // currently focused, matching lazygit's contextual main view (checked
 // against pkg/gui/controllers/files_controller.go's renderWorkingTreeDiff,
@@ -666,7 +681,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.files.SetShowPagination(false)
 		diffCmd := (&m).ensureMainContent()
 		lockCmd := loadLocksCmd(m.runner, changedPaths(msg.status))
-		return m, tea.Batch(setCmd, diffCmd, lockCmd)
+		// statusMsg and historyMsg load independently and can arrive in
+		// either order; rebuild History's unpushed coloring here too so it's
+		// correct even when status lands after history already rendered.
+		historyCmd := (&m).rebuildHistoryItems()
+		return m, tea.Batch(setCmd, diffCmd, lockCmd, historyCmd)
 
 	case branchesMsg:
 		m.appStatus = ""
@@ -697,11 +716,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		items := historyToItems(msg.revisions)
-		cmd := m.history.SetItems(items)
-		m.historyTotal = len(items)
-		m.history.SetShowStatusBar(false)
-		m.history.SetShowPagination(false)
+		m.revisions = msg.revisions
+		cmd := (&m).rebuildHistoryItems()
 		return m, tea.Batch(cmd, (&m).ensureMainContent())
 
 	case locksMsg:

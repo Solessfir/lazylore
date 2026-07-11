@@ -24,6 +24,14 @@ type Status struct {
 	// remote configured, branch not pushed yet, etc).
 	AheadCount  int
 	BehindCount int
+
+	// RemoteRevisionNumber is the remote branch's latest revision number (0
+	// if the branch has never been pushed - every local revision is then
+	// correctly "ahead of" it). Only meaningful when HasRemoteInfo is true;
+	// a stale/zero value while offline or unauthorized would otherwise look
+	// identical to "never pushed" and wrongly mark everything unpushed.
+	RemoteRevisionNumber uint64
+	HasRemoteInfo        bool
 }
 
 // repositoryStatusRevisionData mirrors LoreRepositoryStatusRevisionEventData
@@ -74,12 +82,16 @@ func ParseStatus(output string) (Status, error) {
 			}
 			s.Repository = data.Repository
 			s.Branch = data.BranchName
-			if data.RemoteAvailable != 0 && data.RemoteAuthorized != 0 && data.RemoteBranchExist != 0 {
-				if data.IsLocalAhead != 0 && data.RevisionLocalNumber > data.RevisionRemoteNumber {
-					s.AheadCount = int(data.RevisionLocalNumber - data.RevisionRemoteNumber)
-				}
-				if data.IsRemoteAhead != 0 && data.RevisionRemoteNumber > data.RevisionLocalNumber {
-					s.BehindCount = int(data.RevisionRemoteNumber - data.RevisionLocalNumber)
+			if data.RemoteAvailable != 0 && data.RemoteAuthorized != 0 {
+				s.HasRemoteInfo = true
+				s.RemoteRevisionNumber = data.RevisionRemoteNumber
+				if data.RemoteBranchExist != 0 {
+					if data.IsLocalAhead != 0 && data.RevisionLocalNumber > data.RevisionRemoteNumber {
+						s.AheadCount = int(data.RevisionLocalNumber - data.RevisionRemoteNumber)
+					}
+					if data.IsRemoteAhead != 0 && data.RevisionRemoteNumber > data.RevisionLocalNumber {
+						s.BehindCount = int(data.RevisionRemoteNumber - data.RevisionLocalNumber)
+					}
 				}
 			}
 			sawRevision = true

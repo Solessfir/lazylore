@@ -272,6 +272,7 @@ func formatBranchLog(revisions []lore.Revision) string {
 
 type revisionItem struct {
 	revision lore.Revision
+	unpushed bool // true when this revision hasn't reached the remote branch yet
 }
 
 func (i revisionItem) Title() string {
@@ -286,10 +287,18 @@ func (i revisionItem) Description() string { return "" }
 
 func (i revisionItem) FilterValue() string { return i.revision.Message }
 
-func historyToItems(revisions []lore.Revision) []list.Item {
+// historyToItems builds the History panel's rows, marking each revision
+// unpushed when it's newer than the remote branch's latest known revision
+// (see lore.Status.RemoteRevisionNumber) - matching lazygit's own unpushed/
+// pushed hash coloring (pkg/gui/presentation/commits.go's getHashColor).
+// remoteRevisionNumber/hasRemoteInfo come from the same Status the ahead/
+// behind arrows use; when hasRemoteInfo is false (offline, unauthorized)
+// nothing is marked unpushed rather than guessing.
+func historyToItems(revisions []lore.Revision, remoteRevisionNumber uint64, hasRemoteInfo bool) []list.Item {
 	items := make([]list.Item, 0, len(revisions))
 	for _, rv := range revisions {
-		items = append(items, revisionItem{revision: rv})
+		unpushed := hasRemoteInfo && uint64(rv.Number) > remoteRevisionNumber
+		items = append(items, revisionItem{revision: rv, unpushed: unpushed})
 	}
 	return items
 }
@@ -350,8 +359,11 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 		return
 	}
 
-	// Special for history/revision to match lazygit:
-	// green short hash | purple author ○ | message
+	// Special for history/revision to match lazygit's own unpushed/pushed
+	// hash coloring (pkg/gui/presentation/commits.go's getHashColor: red
+	// StatusUnpushed vs green StatusPushed/StatusMerged - lore only has the
+	// two-state distinction, no separate "merged upstream" status) |
+	// purple author ○ | message.
 	if ri, ok := listItem.(revisionItem); ok {
 		hash := ri.revision.Hash
 		if hash == "" {
@@ -368,12 +380,16 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 		}
 		msg := ri.revision.Message
 
-		green := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+		hashColor := fileStagedColor // green
+		if ri.unpushed {
+			hashColor = fileUnstagedColor // red
+		}
+		hashStyle := lipgloss.NewStyle().Foreground(hashColor)
 		purple := lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple-ish
 		msgStyle := lipgloss.NewStyle()
 		spaceStyle := lipgloss.NewStyle()
 		if selected {
-			green = green.Background(selectedBg).Bold(true)
+			hashStyle = hashStyle.Background(selectedBg).Bold(true)
 			purple = purple.Background(selectedBg)
 			msgStyle = msgStyle.Background(selectedBg)
 			spaceStyle = spaceStyle.Background(selectedBg)
@@ -382,7 +398,7 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 		// Build with explicit styles on all parts (including spaces and msg)
 		// so the blue selection background fills the entire row, matching
 		// the fix for Files and Branches.
-		display := green.Render(hash) +
+		display := hashStyle.Render(hash) +
 			spaceStyle.Render(" ") +
 			purple.Render(author+" ○") +
 			spaceStyle.Render(" ") +
