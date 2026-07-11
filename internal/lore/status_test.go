@@ -50,6 +50,48 @@ func TestParseStatus_Clean(t *testing.T) {
 	if len(s.Staged) != 0 || len(s.Unstaged) != 0 {
 		t.Fatalf("expected no staged/unstaged files, got %+v / %+v", s.Staged, s.Unstaged)
 	}
+	if s.AheadCount != 0 || s.BehindCount != 0 {
+		t.Fatalf("AheadCount/BehindCount = %d/%d, want 0/0 (remoteBranchExist is 0 in this fixture)", s.AheadCount, s.BehindCount)
+	}
+}
+
+func TestParseStatus_AheadOnly(t *testing.T) {
+	out := `{"tagName":"repositoryStatusRevision","data":{"repository":"r","branch":"b","branchName":"main","revision":"h","revisionNumber":7,"revisionStaged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMerged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMergedParentBranch":"0000000000000000000000000000000000000000000000000000000000000000","revisionLocal":"h","revisionLocalNumber":7,"revisionRemote":"r2","revisionRemoteNumber":4,"isLocalAhead":1,"isRemoteAhead":0,"remoteAvailable":1,"remoteAuthorized":1,"remoteBranchExist":1}}
+` + jsonCompleteSuccess
+	s, err := lore.ParseStatus(out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.AheadCount != 3 || s.BehindCount != 0 {
+		t.Fatalf("AheadCount/BehindCount = %d/%d, want 3/0", s.AheadCount, s.BehindCount)
+	}
+}
+
+func TestParseStatus_BehindOnly(t *testing.T) {
+	out := `{"tagName":"repositoryStatusRevision","data":{"repository":"r","branch":"b","branchName":"main","revision":"h","revisionNumber":4,"revisionStaged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMerged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMergedParentBranch":"0000000000000000000000000000000000000000000000000000000000000000","revisionLocal":"h","revisionLocalNumber":4,"revisionRemote":"r2","revisionRemoteNumber":9,"isLocalAhead":0,"isRemoteAhead":1,"remoteAvailable":1,"remoteAuthorized":1,"remoteBranchExist":1}}
+` + jsonCompleteSuccess
+	s, err := lore.ParseStatus(out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.AheadCount != 0 || s.BehindCount != 5 {
+		t.Fatalf("AheadCount/BehindCount = %d/%d, want 0/5", s.AheadCount, s.BehindCount)
+	}
+}
+
+func TestParseStatus_IgnoresRemoteComparisonWhenRemoteBranchDoesNotExist(t *testing.T) {
+	// remoteBranchExist:0 (branch never pushed) - the local/remote revision
+	// numbers aren't a meaningful comparison in that case even if ahead
+	// flags happen to be set, so no count should be derived.
+	out := `{"tagName":"repositoryStatusRevision","data":{"repository":"r","branch":"b","branchName":"main","revision":"h","revisionNumber":7,"revisionStaged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMerged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMergedParentBranch":"0000000000000000000000000000000000000000000000000000000000000000","revisionLocal":"h","revisionLocalNumber":7,"revisionRemote":"0000000000000000000000000000000000000000000000000000000000000000","revisionRemoteNumber":0,"isLocalAhead":1,"isRemoteAhead":0,"remoteAvailable":1,"remoteAuthorized":1,"remoteBranchExist":0}}
+` + jsonCompleteSuccess
+	s, err := lore.ParseStatus(out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.AheadCount != 0 || s.BehindCount != 0 {
+		t.Fatalf("AheadCount/BehindCount = %d/%d, want 0/0 (branch not pushed yet)", s.AheadCount, s.BehindCount)
+	}
 }
 
 func TestParseStatus_Untracked(t *testing.T) {

@@ -17,13 +17,30 @@ type Status struct {
 	Branch     string
 	Staged     []FileChange
 	Unstaged   []FileChange
+
+	// AheadCount/BehindCount are how many revisions the local branch leads/
+	// trails its remote counterpart by. Both zero means either in sync or
+	// there's no meaningful remote comparison available (offline, no
+	// remote configured, branch not pushed yet, etc).
+	AheadCount  int
+	BehindCount int
 }
 
 // repositoryStatusRevisionData mirrors LoreRepositoryStatusRevisionEventData
 // (lore-revision/src/repository/status.rs) - only the fields Status uses.
+// Unlike repositoryStatusFileData's flags below, these serialize as raw 0/1
+// numbers on the wire rather than JSON booleans (confirmed against a real
+// captured `lore --json status` fixture), so they're plain ints here.
 type repositoryStatusRevisionData struct {
-	Repository string `json:"repository"`
-	BranchName string `json:"branchName"`
+	Repository           string `json:"repository"`
+	BranchName           string `json:"branchName"`
+	RevisionLocalNumber  uint64 `json:"revisionLocalNumber"`
+	RevisionRemoteNumber uint64 `json:"revisionRemoteNumber"`
+	IsLocalAhead         int    `json:"isLocalAhead"`
+	IsRemoteAhead        int    `json:"isRemoteAhead"`
+	RemoteAvailable      int    `json:"remoteAvailable"`
+	RemoteAuthorized     int    `json:"remoteAuthorized"`
+	RemoteBranchExist    int    `json:"remoteBranchExist"`
 }
 
 // repositoryStatusFileData mirrors LoreRepositoryStatusFileEventData
@@ -57,6 +74,14 @@ func ParseStatus(output string) (Status, error) {
 			}
 			s.Repository = data.Repository
 			s.Branch = data.BranchName
+			if data.RemoteAvailable != 0 && data.RemoteAuthorized != 0 && data.RemoteBranchExist != 0 {
+				if data.IsLocalAhead != 0 && data.RevisionLocalNumber > data.RevisionRemoteNumber {
+					s.AheadCount = int(data.RevisionLocalNumber - data.RevisionRemoteNumber)
+				}
+				if data.IsRemoteAhead != 0 && data.RevisionRemoteNumber > data.RevisionLocalNumber {
+					s.BehindCount = int(data.RevisionRemoteNumber - data.RevisionLocalNumber)
+				}
+			}
 			sawRevision = true
 
 		case "repositoryStatusFile":

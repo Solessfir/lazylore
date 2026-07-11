@@ -76,12 +76,31 @@ func renderTitledPanelForStatus(width, height int, content string) string {
 	return renderTitledPanel(false, width, height, "", "Status", content)
 }
 
+// aheadBehindArrows renders lazygit's exact ahead/behind indicator
+// (pkg/gui/presentation/branches.go's BranchStatus): "↓N↑N" when the branch
+// diverges both ways, "↓N" behind only, "↑N" ahead only, "" when in sync or
+// no remote comparison is available (offline, no remote, not pushed yet).
+func aheadBehindArrows(ahead, behind int) string {
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow, matches lazygit
+	switch {
+	case behind > 0 && ahead > 0:
+		return style.Render(fmt.Sprintf("↓%d↑%d", behind, ahead)) + " "
+	case behind > 0:
+		return style.Render(fmt.Sprintf("↓%d", behind)) + " "
+	case ahead > 0:
+		return style.Render(fmt.Sprintf("↑%d", ahead)) + " "
+	default:
+		return ""
+	}
+}
+
 func (m Model) View() string {
 	if m.width == 0 {
 		return "loading..."
 	}
 
-	statusText := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render("✓ ") + m.repoName +
+	statusText := aheadBehindArrows(m.status.AheadCount, m.status.BehindCount) +
+		lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render("✓ ") + m.repoName +
 		" (" + lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(m.status.Branch) + ")"
 
 	footer := m.currentFooter()

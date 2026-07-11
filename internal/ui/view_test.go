@@ -10,6 +10,52 @@ import (
 	"lazylore/internal/lore"
 )
 
+func TestAheadBehindArrows_MatchesLazygitsFormat(t *testing.T) {
+	// Ground truth: pkg/gui/presentation/branches.go's BranchStatus -
+	// "↓N↑N" both, "↓N" behind only, "↑N" ahead only, "" in sync.
+	cases := []struct {
+		ahead, behind int
+		want          string
+	}{
+		{0, 0, ""},
+		{3, 0, "↑3"},
+		{0, 5, "↓5"},
+		{2, 4, "↓4↑2"},
+	}
+	for _, c := range cases {
+		got := strings.TrimSpace(aheadBehindArrows(c.ahead, c.behind))
+		if !strings.Contains(got, c.want) || (c.want == "" && got != "") {
+			t.Fatalf("aheadBehindArrows(%d, %d) = %q, want to contain %q", c.ahead, c.behind, got, c.want)
+		}
+	}
+}
+
+func TestModel_StatusTextShowsAheadBehindArrows(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(statusMsg{status: lore.Status{Branch: "main", AheadCount: 2, BehindCount: 1}})
+	m3 := updated.(Model)
+
+	v := m3.View()
+	if !strings.Contains(v, "↓1↑2") {
+		t.Fatalf("View() must show the ahead/behind arrows; got:\n%s", v)
+	}
+}
+
+func TestModel_StatusTextHasNoArrowsWhenInSync(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(statusMsg{status: lore.Status{Branch: "main"}})
+	m3 := updated.(Model)
+
+	v := m3.View()
+	if strings.Contains(v, "↓") || strings.Contains(v, "↑") {
+		t.Fatalf("View() must show no arrows when AheadCount/BehindCount are both 0; got:\n%s", v)
+	}
+}
+
 func TestBracketedKey_WrapsNamedKeysNotLiterals(t *testing.T) {
 	if got := bracketedKey("space"); got != "<space>" {
 		t.Fatalf("bracketedKey(space) = %q, want <space>", got)
