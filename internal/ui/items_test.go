@@ -29,7 +29,7 @@ func TestSelectedRowStyle_BoundedToGivenWidth(t *testing.T) {
 }
 
 func TestFileItem_FilterValueIsThePath(t *testing.T) {
-	item := fileItem{path: "hello.txt", change: lore.FileChange{Status: 'M', Path: "hello.txt"}, staged: false}
+	item := fileItem{path: "hello.txt", label: "hello.txt", change: lore.FileChange{Status: 'M', Path: "hello.txt"}, staged: false}
 	if item.FilterValue() != "hello.txt" {
 		t.Fatalf("FilterValue() = %q, want %q", item.FilterValue(), "hello.txt")
 	}
@@ -58,7 +58,7 @@ func TestFileNameStyle_StagedIsGreenUnstagedIsUncolored(t *testing.T) {
 }
 
 func TestFileDelegate_RenderColorsStatusLetterButNotUnstagedName(t *testing.T) {
-	items := []list.Item{fileItem{path: "hello.txt", change: lore.FileChange{Status: 'M', Path: "hello.txt"}, staged: false}}
+	items := []list.Item{fileItem{path: "hello.txt", label: "hello.txt", change: lore.FileChange{Status: 'M', Path: "hello.txt"}, staged: false}}
 	l := list.New(items, fileDelegate{focused: false}, 40, 5)
 
 	var buf bytes.Buffer
@@ -76,16 +76,18 @@ func TestStatusToItems_StagedThenUnstaged(t *testing.T) {
 		Unstaged: []lore.FileChange{{Status: 'M', Path: "b.txt"}},
 	}
 	items := statusToItems(s, nil, nil, "")
-	if len(items) != 2 {
-		t.Fatalf("items = %+v, want 2 entries", items)
+	// Two top-level entries, so a "/" root row wraps them (see
+	// TestBuildFileTree_MultipleTopLevelEntriesShowRootRow).
+	if len(items) != 3 {
+		t.Fatalf("items = %+v, want 3 entries (/, a.txt, b.txt)", items)
 	}
-	first, ok := items[0].(fileItem)
+	first, ok := items[1].(fileItem)
 	if !ok || !first.staged || first.change.Path != "a.txt" {
-		t.Fatalf("items[0] = %+v, want the staged a.txt entry first", items[0])
+		t.Fatalf("items[1] = %+v, want the staged a.txt entry first", items[1])
 	}
-	second, ok := items[1].(fileItem)
+	second, ok := items[2].(fileItem)
 	if !ok || second.staged || second.change.Path != "b.txt" {
-		t.Fatalf("items[1] = %+v, want the unstaged b.txt entry second", items[1])
+		t.Fatalf("items[2] = %+v, want the unstaged b.txt entry second", items[2])
 	}
 }
 
@@ -93,13 +95,14 @@ func TestStatusToItems_MarksLockedFiles(t *testing.T) {
 	s := lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}, {Status: 'M', Path: "b.txt"}}}
 	locks := map[string]lore.Lock{"a.txt": {Path: "a.txt", Owner: "someone"}}
 	items := statusToItems(s, nil, locks, "")
-	a, ok := items[0].(fileItem)
+	// Two top-level entries, so a "/" root row wraps them.
+	a, ok := items[1].(fileItem)
 	if !ok || !a.locked {
-		t.Fatalf("items[0] = %+v, want a.txt marked locked", items[0])
+		t.Fatalf("items[1] = %+v, want a.txt marked locked", items[1])
 	}
-	b, ok := items[1].(fileItem)
+	b, ok := items[2].(fileItem)
 	if !ok || b.locked {
-		t.Fatalf("items[1] = %+v, want b.txt not locked", items[1])
+		t.Fatalf("items[2] = %+v, want b.txt not locked", items[2])
 	}
 }
 
@@ -110,13 +113,14 @@ func TestStatusToItems_DistinguishesLockedByMeFromLockedByOther(t *testing.T) {
 		"theirs.txt": {Path: "theirs.txt", Owner: "user-456"},
 	}
 	items := statusToItems(s, nil, locks, "user-123")
-	mine, ok := items[0].(fileItem)
+	// Two top-level entries, so a "/" root row wraps them.
+	mine, ok := items[1].(fileItem)
 	if !ok || !mine.locked || !mine.lockedByMe {
-		t.Fatalf("items[0] = %+v, want mine.txt locked and lockedByMe", items[0])
+		t.Fatalf("items[1] = %+v, want mine.txt locked and lockedByMe", items[1])
 	}
-	theirs, ok := items[1].(fileItem)
+	theirs, ok := items[2].(fileItem)
 	if !ok || !theirs.locked || theirs.lockedByMe {
-		t.Fatalf("items[1] = %+v, want theirs.txt locked but not lockedByMe", items[1])
+		t.Fatalf("items[2] = %+v, want theirs.txt locked but not lockedByMe", items[2])
 	}
 }
 
@@ -134,7 +138,7 @@ func TestStatusToItems_EmptyCurrentUserIDNeverMarksLockedByMe(t *testing.T) {
 }
 
 func TestFileDelegate_RenderShowsLockBadgeForLockedFile(t *testing.T) {
-	item := fileItem{path: "a.txt", change: lore.FileChange{Status: 'M', Path: "a.txt"}, locked: true}
+	item := fileItem{path: "a.txt", label: "a.txt", change: lore.FileChange{Status: 'M', Path: "a.txt"}, locked: true}
 	l := list.New([]list.Item{item}, fileDelegate{focused: false}, 40, 5)
 
 	var buf bytes.Buffer

@@ -59,8 +59,12 @@ func fileNameStyle(staged bool) lipgloss.Style {
 // FileChange it represents - one tree, built fresh from Status on every
 // refresh by statusToItems, with collapse state carried separately on
 // Model so it survives a refresh.
+// label is the row's display text - own name normally, or the merged
+// remainder for a row a directory chain compressed into (see filetree.go's
+// rowLabel); "/" for the synthetic root.
 type fileItem struct {
 	path       string
+	label      string
 	isDir      bool
 	depth      int
 	change     lore.FileChange
@@ -71,13 +75,6 @@ type fileItem struct {
 }
 
 func (i fileItem) FilterValue() string { return i.path }
-
-func (i fileItem) baseName() string {
-	if idx := strings.LastIndex(i.path, "/"); idx >= 0 {
-		return i.path[idx+1:]
-	}
-	return i.path
-}
 
 // fileDelegate renders Files list items itself, rather than going through
 // list.DefaultDelegate's Title()/Description() two-line convention - lore's
@@ -121,13 +118,13 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 			if fi.collapsed {
 				arrow = "▶"
 			}
-			fmt.Fprint(w, indent+arrow+" "+fi.baseName())
+			fmt.Fprint(w, indent+arrow+" "+fi.label)
 			return
 		}
 		// File, not selected: apply per-part colors (status red/green, name color for staged)
 		statusStyle := lipgloss.NewStyle().Foreground(fileStatusColor(fi.staged))
 		nameStyle := fileNameStyle(fi.staged)
-		line := indent + statusStyle.Render(string(fi.change.Status)) + " " + nameStyle.Render(fi.baseName())
+		line := indent + statusStyle.Render(string(fi.change.Status)) + " " + nameStyle.Render(fi.label)
 		if fi.locked {
 			line += " " + lockBadgeStyle(fi.lockedByMe).Render(lockBadge)
 		}
@@ -146,7 +143,7 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		if fi.collapsed {
 			arrow = "▶"
 		}
-		display := indent + arrow + " " + fi.baseName()
+		display := indent + arrow + " " + fi.label
 		fmt.Fprint(w, selectedRowStyle(rowWidth).Render(display))
 		return
 	}
@@ -169,7 +166,7 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	colored := selSpace.Render(indent) +
 		statStyle.Render(string(fi.change.Status)) +
 		selSpace.Render(" ") +
-		nameStyle.Render(fi.baseName())
+		nameStyle.Render(fi.label)
 	if fi.locked {
 		colored += selSpace.Render(" ") + lockBadgeStyle(fi.lockedByMe).Background(selectedBg).Render(lockBadge)
 	}
@@ -194,6 +191,7 @@ func statusToItems(s lore.Status, collapsedDirs map[string]bool, locks map[strin
 		lockedByMe := locked && currentUserID != "" && lock.Owner == currentUserID
 		items = append(items, fileItem{
 			path:       row.node.path,
+			label:      row.label,
 			isDir:      row.node.isDir,
 			depth:      row.depth,
 			change:     row.node.change,

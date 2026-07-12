@@ -6,52 +6,106 @@ import (
 	"lazylore/internal/lore"
 )
 
-func TestBuildFileTree_FlatFileHasNoDirectoryAncestor(t *testing.T) {
+func TestBuildFileTree_EmptyStatusHasNoRows(t *testing.T) {
+	tree := buildFileTree(lore.Status{})
+	rows := flattenFileTree(tree, nil)
+	if len(rows) != 0 {
+		t.Fatalf("rows = %+v, want none for an empty status", rows)
+	}
+}
+
+func TestBuildFileTree_SingleTopLevelFileSkipsRootRow(t *testing.T) {
 	s := lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}
 	tree := buildFileTree(s)
-
-	if len(tree.children) != 1 {
-		t.Fatalf("root children = %+v, want 1 entry", tree.children)
+	rows := flattenFileTree(tree, nil)
+	if len(rows) != 1 || rows[0].label != "a.txt" || rows[0].depth != 0 {
+		t.Fatalf("rows = %+v, want a single a.txt row at depth 0, no root wrapper", rows)
 	}
-	if tree.children[0].isDir {
-		t.Fatalf("a.txt at repo root should be a file leaf, not a directory")
-	}
-	if tree.children[0].path != "a.txt" {
-		t.Fatalf("path = %q, want %q", tree.children[0].path, "a.txt")
+	if rows[0].node.isDir {
+		t.Fatalf("rows[0] = %+v, want a.txt as a file leaf, not a directory", rows[0])
 	}
 }
 
-func TestBuildFileTree_GroupsFilesUnderSharedDirectory(t *testing.T) {
+func TestBuildFileTree_SingleTopLevelDirectoryChainSkipsRootRow(t *testing.T) {
+	s := lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}
+	tree := buildFileTree(s)
+	rows := flattenFileTree(tree, nil)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %+v, want 2 (src/, src/a.go)", rows)
+	}
+	if rows[0].label != "src" || rows[0].depth != 0 || !rows[0].node.isDir {
+		t.Fatalf("rows[0] = %+v, want the 'src' directory at depth 0", rows[0])
+	}
+	if rows[1].label != "a.go" || rows[1].depth != 1 {
+		t.Fatalf("rows[1] = %+v, want a.go at depth 1", rows[1])
+	}
+}
+
+func TestBuildFileTree_MultipleTopLevelEntriesShowRootRow(t *testing.T) {
 	s := lore.Status{Unstaged: []lore.FileChange{
-		{Status: 'M', Path: "src/a.go"},
-		{Status: 'M', Path: "src/b.go"},
+		{Status: 'M', Path: "a.txt"},
+		{Status: 'M', Path: "b.txt"},
 	}}
 	tree := buildFileTree(s)
-
-	if len(tree.children) != 1 || !tree.children[0].isDir || tree.children[0].name != "src" {
-		t.Fatalf("root children = %+v, want a single 'src' directory", tree.children)
+	rows := flattenFileTree(tree, nil)
+	if len(rows) != 3 {
+		t.Fatalf("rows = %+v, want 3 (/, a.txt, b.txt)", rows)
 	}
-	srcDir := tree.children[0]
-	if len(srcDir.children) != 2 {
-		t.Fatalf("src/ children = %+v, want 2 files", srcDir.children)
+	if rows[0].label != "/" || rows[0].depth != 0 || !rows[0].node.isDir {
+		t.Fatalf("rows[0] = %+v, want the root '/' row at depth 0", rows[0])
+	}
+	if rows[1].label != "a.txt" || rows[1].depth != 1 {
+		t.Fatalf("rows[1] = %+v, want a.txt at depth 1 under root", rows[1])
+	}
+	if rows[2].label != "b.txt" || rows[2].depth != 1 {
+		t.Fatalf("rows[2] = %+v, want b.txt at depth 1 under root", rows[2])
 	}
 }
 
-func TestBuildFileTree_NestedDirectoriesBuildFullChain(t *testing.T) {
-	s := lore.Status{Staged: []lore.FileChange{{Status: 'A', Path: "internal/ui/model.go"}}}
+func TestBuildFileTree_ChainOfSingleChildDirectoriesCompressesIntoOneRow(t *testing.T) {
+	s := lore.Status{Unstaged: []lore.FileChange{
+		{Status: 'M', Path: "Content/Sus/Blueprints/BP_PlayerController.uasset"},
+	}}
 	tree := buildFileTree(s)
+	rows := flattenFileTree(tree, nil)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %+v, want 2 (the merged chain row, then the file)", rows)
+	}
+	if rows[0].label != "Content/Sus/Blueprints" || rows[0].depth != 0 {
+		t.Fatalf("rows[0] = %+v, want the merged 'Content/Sus/Blueprints' row at depth 0", rows[0])
+	}
+	if rows[0].node.path != "Content/Sus/Blueprints" {
+		t.Fatalf("rows[0].node.path = %q, want the full merged path so collapse toggling still works", rows[0].node.path)
+	}
+	if rows[1].label != "BP_PlayerController.uasset" || rows[1].depth != 1 {
+		t.Fatalf("rows[1] = %+v, want the file at depth 1, showing just its own name", rows[1])
+	}
+}
 
-	internal := tree.children[0]
-	if internal.name != "internal" || !internal.isDir {
-		t.Fatalf("first level = %+v, want directory 'internal'", internal)
+func TestBuildFileTree_ChainStopsAtADirectoryWithMultipleChildren(t *testing.T) {
+	s := lore.Status{Unstaged: []lore.FileChange{
+		{Status: 'M', Path: "Plugins/LoreSourceControl/Config/FilterPlugin.ini"},
+		{Status: 'M', Path: "Plugins/LoreSourceControl/README.md"},
+	}}
+	tree := buildFileTree(s)
+	rows := flattenFileTree(tree, nil)
+	// Plugins/ has one child (LoreSourceControl/) so it merges with it, but
+	// LoreSourceControl/ itself has two children (Config/, README.md) so the
+	// chain stops there instead of also swallowing Config/.
+	if len(rows) != 4 {
+		t.Fatalf("rows = %+v, want 4 (Plugins/LoreSourceControl, Config, FilterPlugin.ini, README.md)", rows)
 	}
-	ui := internal.children[0]
-	if ui.name != "ui" || !ui.isDir || ui.path != "internal/ui" {
-		t.Fatalf("second level = %+v, want directory 'internal/ui'", ui)
+	if rows[0].label != "Plugins/LoreSourceControl" || rows[0].depth != 0 {
+		t.Fatalf("rows[0] = %+v, want the merged 'Plugins/LoreSourceControl' row", rows[0])
 	}
-	model := ui.children[0]
-	if model.isDir || model.path != "internal/ui/model.go" {
-		t.Fatalf("leaf = %+v, want file 'internal/ui/model.go'", model)
+	if rows[1].label != "Config" || rows[1].depth != 1 || !rows[1].node.isDir {
+		t.Fatalf("rows[1] = %+v, want the 'Config' directory at depth 1 (not merged further)", rows[1])
+	}
+	if rows[2].label != "FilterPlugin.ini" || rows[2].depth != 2 {
+		t.Fatalf("rows[2] = %+v, want FilterPlugin.ini at depth 2", rows[2])
+	}
+	if rows[3].label != "README.md" || rows[3].depth != 1 {
+		t.Fatalf("rows[3] = %+v, want README.md at depth 1", rows[3])
 	}
 }
 
@@ -61,12 +115,12 @@ func TestBuildFileTree_SamePathStagedAndUnstagedAreTwoLeaves(t *testing.T) {
 		Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}},
 	}
 	tree := buildFileTree(s)
-
-	if len(tree.children) != 2 {
-		t.Fatalf("root children = %+v, want 2 leaves (staged + unstaged a.txt)", tree.children)
+	rows := flattenFileTree(tree, nil)
+	if len(rows) != 3 {
+		t.Fatalf("rows = %+v, want 3 (/, staged a.txt, unstaged a.txt)", rows)
 	}
-	if tree.children[0].staged == tree.children[1].staged {
-		t.Fatalf("expected one staged and one unstaged leaf, got %+v", tree.children)
+	if rows[1].node.staged == rows[2].node.staged {
+		t.Fatalf("expected one staged and one unstaged a.txt leaf, got %+v", rows[1:])
 	}
 }
 
@@ -76,22 +130,9 @@ func TestBuildFileTree_ChildrenSortedAlphabetically(t *testing.T) {
 		{Status: 'M', Path: "a.txt"},
 	}}
 	tree := buildFileTree(s)
-
-	if tree.children[0].name != "a.txt" || tree.children[1].name != "z.txt" {
-		t.Fatalf("children = %+v, want a.txt before z.txt", tree.children)
-	}
-}
-
-func TestFlattenFileTree_ExpandedShowsEveryNode(t *testing.T) {
-	s := lore.Status{Unstaged: []lore.FileChange{
-		{Status: 'M', Path: "src/a.go"},
-		{Status: 'M', Path: "b.txt"},
-	}}
-	tree := buildFileTree(s)
 	rows := flattenFileTree(tree, nil)
-
-	if len(rows) != 3 {
-		t.Fatalf("rows = %+v, want 3 (b.txt, src/, src/a.go)", rows)
+	if rows[1].label != "a.txt" || rows[2].label != "z.txt" {
+		t.Fatalf("rows = %+v, want a.txt before z.txt", rows)
 	}
 }
 
@@ -111,18 +152,15 @@ func TestFlattenFileTree_CollapsedDirectoryHidesChildren(t *testing.T) {
 	}
 }
 
-func TestFlattenFileTree_DepthIncreasesPerNestingLevel(t *testing.T) {
-	s := lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a/b/c.go"}}}
+func TestFlattenFileTree_CollapsingRootHidesEverything(t *testing.T) {
+	s := lore.Status{Unstaged: []lore.FileChange{
+		{Status: 'M', Path: "a.txt"},
+		{Status: 'M', Path: "b.txt"},
+	}}
 	tree := buildFileTree(s)
-	rows := flattenFileTree(tree, nil)
+	rows := flattenFileTree(tree, map[string]bool{"": true})
 
-	wantDepths := []int{0, 1, 2} // a/, a/b/, a/b/c.go
-	if len(rows) != len(wantDepths) {
-		t.Fatalf("rows = %+v, want %d rows", rows, len(wantDepths))
-	}
-	for i, want := range wantDepths {
-		if rows[i].depth != want {
-			t.Fatalf("rows[%d].depth = %d, want %d", i, rows[i].depth, want)
-		}
+	if len(rows) != 1 || rows[0].label != "/" {
+		t.Fatalf("rows = %+v, want just the collapsed root row", rows)
 	}
 }
