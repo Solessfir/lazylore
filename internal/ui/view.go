@@ -51,6 +51,12 @@ func bracketedKey(k string) string {
 // truncation in formatBindingInfos.
 func keybindBarFor(focus focusPanel) string {
 	switch focus {
+	case focusStatus:
+		// lazygit's real Status panel has its own actions (edit config,
+		// check for update, switch to a recent repo, cycle branch logs) -
+		// none of those exist in lazylore yet, so there's nothing
+		// panel-specific to show here.
+		return "Keybindings: ?"
 	case focusFiles:
 		return "Stage: " + bracketedKey("space") + " | Commit: c | Edit: e | Discard: d | Reset: D | Lock: L | Keybindings: ?"
 	case focusBranches:
@@ -103,12 +109,12 @@ func renderPanel(focused bool, width, height int, title, content string) string 
 	return s.Width(width).Height(height).Render(title + "\n" + content)
 }
 
-// renderTitledPanelForStatus is a convenience for the always-unfocused
-// compact status panel.
-func renderTitledPanelForStatus(width, height int, content string) string {
-	// Status is informational and never the "focused" panel in this UI.
-	// Jump key 1 (and 2) target the Files panel below it, so no [N] here.
-	return renderTitledPanel(false, width, height, "", "Status", content)
+// renderTitledPanelForStatus is a convenience for the compact status panel,
+// jumpable/focusable via "1" (see keys.go), matching lazygit's real
+// numbering (Gui.SidePanels' default order: Status, Files, Branches,
+// Commits, Stash).
+func renderTitledPanelForStatus(focused bool, width, height int, content string) string {
+	return renderTitledPanel(focused, width, height, "1", "Status", content)
 }
 
 // aheadBehindArrows renders lazygit's exact ahead/behind indicator
@@ -181,13 +187,13 @@ func (m Model) View() string {
 	// Use titled-border rendering so "Status"/"Files" etc. appear in the top
 	// border line itself (╭─[N]─Title────╮), matching lazygit.
 	statusInnerH := max(0, statusPanelHeight-borderHeight)
-	statusPanel := renderTitledPanelForStatus(m.panelWidth, statusInnerH, statusText)
+	statusPanel := renderTitledPanelForStatus(m.focus == focusStatus, m.panelWidth, statusInnerH, statusText)
 
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		statusPanel,
 		func() string {
 			v := strings.TrimLeft(m.files.View(), "\n\r")
-			p := renderTitledPanel(m.focus == focusFiles, m.panelWidth, effFilesH, "1", "Files", v)
+			p := renderTitledPanel(m.focus == focusFiles, m.panelWidth, effFilesH, "2", "Files", v)
 			if m.filesTotal > 0 {
 				cur := m.files.Index() + 1
 				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.filesTotal), m.focus == focusFiles)

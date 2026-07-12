@@ -98,7 +98,8 @@ func globalHelpRows() []helpRow {
 	return []helpRow{
 		{key: "tab / l", desc: "Next panel"},
 		{key: "shift+tab / h", desc: "Previous panel"},
-		{key: "1-5", desc: "Jump to panel"},
+		{key: "1-5", desc: "Jump to panel (1 Status, 2 Files, 3 Branches, 4 History, 5 Diff)"},
+		{key: "[ / ]", desc: "Cycle panel sub-tabs (Branches: Local/Remotes)"},
 		{key: "/", desc: "Filter list"},
 		{key: "v", desc: "Select mode (release mouse to copy text)"},
 		{key: "q", desc: "Quit"},

@@ -11,7 +11,8 @@ import (
 type focusPanel int
 
 const (
-	focusFiles focusPanel = iota
+	focusStatus focusPanel = iota
+	focusFiles
 	focusBranches
 	focusHistory
 	focusDiff
@@ -48,22 +49,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "tab", "l":
-		m.focus = (m.focus + 1) % 4
+		m.focus = (m.focus + 1) % 5
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
 		return m, (&m).ensureMainContent()
 
 	case "shift+tab", "h":
-		m.focus = (m.focus + 3) % 4
+		m.focus = (m.focus + 4) % 5
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
 		return m, (&m).ensureMainContent()
 
-	// Panel jump keys like lazygit (1/2=Files (under Status), 3=Branches, 4=History, 5=Diff)
+	// Panel jump keys, matching lazygit's real numbering exactly
+	// (pkg/config/user_config.go's default Gui.SidePanels: 1=Status,
+	// 2=Files, 3=Branches, 4=Commits, 5=Stash) except 5, repurposed for
+	// Diff since lore has no stash - lazygit doesn't number its main panel
+	// at all (it's reached via NextBlock/PrevBlock, not a jump key), but
+	// lazylore's simpler layout treats Diff as a fifth jumpable panel.
 	case "1":
-		m.focus = focusFiles
+		m.focus = focusStatus
 		m.syncFocusDelegates()
-		return m, (&m).ensureMainContent()
+		return m, nil
 	case "2":
 		m.focus = focusFiles
 		m.syncFocusDelegates()
@@ -81,6 +87,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focus = focusDiff
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
+		return m, nil
+
+	// Cycle the focused panel's own sub-tabs, matching lazygit's global
+	// NextTab/PrevTab ("]"/"["): only Branches has more than one in lore
+	// (Local/Remotes - no Tags, no Files/History/Status equivalent to
+	// git's worktrees/submodules/reflog), so this no-ops elsewhere, same
+	// as lazygit on a single-tab window. Hidden from the bottom bar in
+	// lazygit too (no DisplayOnScreen on that binding) - see "?" instead.
+	case "[", "]":
+		if m.focus == focusBranches {
+			m.showRemoteBranches = !m.showRemoteBranches
+			return m, m.refreshBranchesList()
+		}
 		return m, nil
 
 	case "c":

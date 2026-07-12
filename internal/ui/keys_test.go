@@ -48,6 +48,93 @@ func TestModel_JumpToBranchesLoadsLogForSelectedBranch(t *testing.T) {
 	}
 }
 
+func TestModel_OneKeyJumpsToStatus(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+	m2 := updated.(Model)
+	if m2.focus != focusStatus {
+		t.Fatalf("focus = %v, want focusStatus", m2.focus)
+	}
+}
+
+func TestModel_TwoKeyJumpsToFiles(t *testing.T) {
+	// Regression: "1" and "2" used to both jump to Files (Status had no
+	// focusable state of its own) - lazygit's real numbering (Gui.SidePanels)
+	// is 1=Status, 2=Files, distinct panels.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.focus = focusStatus
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	m2 := updated.(Model)
+	if m2.focus != focusFiles {
+		t.Fatalf("focus = %v, want focusFiles", m2.focus)
+	}
+}
+
+func TestModel_TabCyclesThroughAllFivePanelsIncludingStatus(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.focus = focusStatus // NewModel defaults to focusFiles - start from a known point
+	order := []focusPanel{focusStatus, focusFiles, focusBranches, focusHistory, focusDiff, focusStatus}
+	for i := 1; i < len(order); i++ {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+		m = updated.(Model)
+		if m.focus != order[i] {
+			t.Fatalf("after %d tab(s): focus = %v, want %v", i, m.focus, order[i])
+		}
+	}
+}
+
+func TestModel_ShiftTabCyclesBackwardThroughStatus(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.focus = focusStatus
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	m2 := updated.(Model)
+	if m2.focus != focusDiff {
+		t.Fatalf("focus = %v, want focusDiff (wrapped backward from Status)", m2.focus)
+	}
+}
+
+func TestModel_BracketKeysToggleRemoteTabOnlyWhenBranchesFocused(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.focus = focusBranches
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]")})
+	m2 := updated.(Model)
+	if !m2.showRemoteBranches {
+		t.Fatal("expected showRemoteBranches = true after ']' on Branches")
+	}
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[")})
+	m3 := updated.(Model)
+	if m3.showRemoteBranches {
+		t.Fatal("expected showRemoteBranches = false after '[' on Branches")
+	}
+}
+
+func TestModel_BracketKeysNoOpOutsideBranches(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.focus = focusFiles
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]")})
+	m2 := updated.(Model)
+	if cmd != nil {
+		t.Fatalf("expected a nil Cmd for ']' outside Branches, got %v", cmd)
+	}
+	if m2.showRemoteBranches {
+		t.Fatal("expected showRemoteBranches to stay false when Files is focused")
+	}
+}
+
+func TestModel_MouseClickOnStatusAreaFocusesStatus(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.width, m.height = 100, 40
+	(&m).resize()
+	m.focus = focusFiles
+
+	updated, _ := m.Update(tea.MouseMsg{X: 5, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m2 := updated.(Model)
+	if m2.focus != focusStatus {
+		t.Fatalf("focus = %v, want focusStatus after clicking the Status area", m2.focus)
+	}
+}
+
 func TestModel_JumpToHistoryLoadsPatchForSelectedRevision(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json diff --source parenthash --target abc123": {ExitCode: 0, Stdout: jsonCompleteSuccess},

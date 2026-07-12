@@ -544,14 +544,14 @@ func TestModel_LeftStackAndRightColumnPanelOrder(t *testing.T) {
 	m2 := updated.(Model)
 	v := m2.View()
 
-	for _, want := range []string{"Status", "[1]─Files", "[3]─", "[4]─History", "[5]─Diff", "Command Log"} {
+	for _, want := range []string{"[1]─Status", "[2]─Files", "[3]─", "[4]─History", "[5]─Diff", "Command Log"} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("View must contain %q; got:\n%s", want, v)
 		}
 	}
 
 	// Left stack order: Files above History.
-	filesIdx := strings.Index(v, "[1]─Files")
+	filesIdx := strings.Index(v, "[2]─Files")
 	histIdx := strings.Index(v, "[4]─History")
 	if filesIdx == -1 || histIdx == -1 || histIdx < filesIdx {
 		t.Fatalf("History should appear below Files in left stack; filesIdx=%d histIdx=%d", filesIdx, histIdx)

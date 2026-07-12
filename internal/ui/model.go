@@ -282,8 +282,8 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		// Left side
 		switch {
 		case y < filesBoxTop:
-			// Status area -> focus Files (like jump key 1/2)
-			newFocus = focusFiles
+			// Status area -> focus Status itself (jump key 1)
+			newFocus = focusStatus
 		case y < branchesBoxTop:
 			newFocus = focusFiles
 			// Click inside Files content: select the exact row under mouse.
@@ -675,7 +675,10 @@ func (m Model) currentFooter() string {
 // when the focused panel has no meaningful content selected (a directory
 // in Files, an empty list).
 func (m *Model) ensureMainContent() tea.Cmd {
-	if m.focus != focusDiff {
+	// Status has no main-panel content of its own (matches lazygit - it's
+	// not one of the contexts that drives the main view), so focusing it
+	// must not overwrite what mainPanelTitle/the diff panel still shows.
+	if m.focus != focusDiff && m.focus != focusStatus {
 		m.mainContentSource = m.focus
 	}
 	switch m.focus {

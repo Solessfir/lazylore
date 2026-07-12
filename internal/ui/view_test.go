@@ -116,6 +116,17 @@ func TestBracketedKey_WrapsNamedKeysNotLiterals(t *testing.T) {
 	}
 }
 
+func TestKeybindBarFor_StatusHasNoPanelSpecificBindingsYet(t *testing.T) {
+	// lazygit's real Status panel has its own actions (edit config, check
+	// for update, switch to a recent repo, cycle branch logs) - none exist
+	// in lazylore yet, so only the universal Keybindings/? entry shows.
+	got := keybindBarFor(focusStatus)
+	want := "Keybindings: ?"
+	if got != want {
+		t.Fatalf("keybindBarFor(focusStatus) = %q, want %q", got, want)
+	}
+}
+
 func TestKeybindBarFor_FilesMatchesLazygitsDisplayOnScreenSet(t *testing.T) {
 	// Ground truth: pkg/gui/controllers/files_controller.go's DisplayOnScreen:
 	// true bindings, in registration order (Select/space, CommitChanges/c,
@@ -296,7 +307,7 @@ func TestRenderTitledPanel_TitleLivesInBorderNotContent(t *testing.T) {
 }
 
 func TestRenderTitledPanel_StatusCompact(t *testing.T) {
-	out := renderTitledPanelForStatus(20, 1, "myrepo → main")
+	out := renderTitledPanelForStatus(false, 20, 1, "myrepo → main")
 	lines := strings.Split(out, "\n")
 	// status outer h = 1 (content) + 2 borders = 3
 	if len(lines) != 3 {
