@@ -114,7 +114,7 @@ func globalHelpRows() []helpRow {
 func (m Model) helpContent() string {
 	key := lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true) // blue
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))            // white
-	hdr := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	hdr := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true) // green
 
 	var rows []helpRow
 	if local := m.localHelpRows(); len(local) > 0 {

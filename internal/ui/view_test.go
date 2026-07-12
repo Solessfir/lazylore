@@ -122,9 +122,11 @@ func TestKeybindBarFor_FilesMatchesLazygitsDisplayOnScreenSet(t *testing.T) {
 	// Edit/e, Remove/d, ViewResetOptions/D) - Stash dropped since lore has
 	// none, Lock/L is lore-native (git/lazygit have no locking concept).
 	// Enter (diff/collapse) is intentionally left off the bar, same as
-	// lazygit's own Enter binding for files.
+	// lazygit's own Enter binding for files. Keybindings/? matches the
+	// Global OptionMenu binding every context appends last
+	// (global_controller.go).
 	got := keybindBarFor(focusFiles)
-	want := "Stage: <space> | Commit: c | Edit: e | Discard: d | Reset: D | Lock: L"
+	want := "Stage: <space> | Commit: c | Edit: e | Discard: d | Reset: D | Lock: L | Keybindings: ?"
 	if got != want {
 		t.Fatalf("keybindBarFor(focusFiles) = %q, want %q", got, want)
 	}
@@ -136,7 +138,7 @@ func TestKeybindBarFor_BranchesMatchesLazygitsSupportedSubset(t *testing.T) {
 	// lore has no delete/rebase/merge/upstream equivalent (checked
 	// lore-cli-commands.md), so only Checkout/New/Reset carry over.
 	got := keybindBarFor(focusBranches)
-	want := "Checkout: <space> | New branch: n | Reset: g"
+	want := "Checkout: <space> | New branch: n | Reset: g | Keybindings: ?"
 	if got != want {
 		t.Fatalf("keybindBarFor(focusBranches) = %q, want %q", got, want)
 	}
@@ -150,7 +152,7 @@ func TestKeybindBarFor_HistoryMatchesLazygitsSupportedSubset(t *testing.T) {
 	// Drop(d) carries over as a revert (lore.RevertRevision), the closest
 	// lore equivalent for anything but the tip commit.
 	got := keybindBarFor(focusHistory)
-	want := "Checkout: <space> | Drop: d | Reset: g"
+	want := "Checkout: <space> | Drop: d | Reset: g | Keybindings: ?"
 	if got != want {
 		t.Fatalf("keybindBarFor(focusHistory) = %q, want %q", got, want)
 	}
@@ -159,6 +161,35 @@ func TestKeybindBarFor_HistoryMatchesLazygitsSupportedSubset(t *testing.T) {
 func TestKeybindBarFor_DiffHasNoBoundActionsYet(t *testing.T) {
 	if got := keybindBarFor(focusDiff); got != "" {
 		t.Fatalf("keybindBarFor(focusDiff) = %q, want empty (Diff panel is scroll-only)", got)
+	}
+}
+
+func TestTruncateKeybindBar_KeepsWholeBarWhenItFits(t *testing.T) {
+	bar := "Stage: <space> | Commit: c"
+	if got := truncateKeybindBar(bar, 200); got != bar {
+		t.Fatalf("truncateKeybindBar() = %q, want unchanged %q", got, bar)
+	}
+}
+
+func TestTruncateKeybindBar_DropsTailEntriesPastWidthWithEllipsis(t *testing.T) {
+	// "Stage: <space>" is 14 cols; width 20 fits it but not " | Commit: c" (12
+	// more cols) on top, so the second entry becomes " | …" instead.
+	bar := "Stage: <space> | Commit: c | Edit: e"
+	got := truncateKeybindBar(bar, 20)
+	want := "Stage: <space> | …"
+	if got != want {
+		t.Fatalf("truncateKeybindBar() = %q, want %q", got, want)
+	}
+}
+
+func TestTruncateKeybindBar_AlwaysKeepsFirstEntryEvenWhenNarrowerThanIt(t *testing.T) {
+	// Matches lazygit's own formatBindingInfos: the width check only applies
+	// from the second entry onward, so a lone entry is never itself cut
+	// short or given a pointless trailing ellipsis.
+	bar := "Stage: <space>"
+	got := truncateKeybindBar(bar, 3)
+	if got != bar {
+		t.Fatalf("truncateKeybindBar() = %q, want unchanged %q", got, bar)
 	}
 }
 

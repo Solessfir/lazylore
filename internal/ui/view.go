@@ -43,18 +43,53 @@ func bracketedKey(k string) string {
 // bottom option bar (pkg/gui/options_map.go: renderContextOptionsMap),
 // which shows only the current context's "DisplayOnScreen" bindings - not
 // a single static global list. Kept to keys handleKey/handlePromptKey
-// actually implement for that panel.
+// actually implement for that panel. "Keybindings: ?" is appended last on
+// every panel, matching lazygit's Global OptionMenu binding (ShortDescription
+// "Keybindings", always appended after context-specific ones - see
+// pkg/gui/controllers/global_controller.go) - truncateKeybindBar (below) is
+// what drops it first on a narrow terminal, same as lazygit's own ellipsis
+// truncation in formatBindingInfos.
 func keybindBarFor(focus focusPanel) string {
 	switch focus {
 	case focusFiles:
-		return "Stage: " + bracketedKey("space") + " | Commit: c | Edit: e | Discard: d | Reset: D | Lock: L"
+		return "Stage: " + bracketedKey("space") + " | Commit: c | Edit: e | Discard: d | Reset: D | Lock: L | Keybindings: ?"
 	case focusBranches:
-		return "Checkout: " + bracketedKey("space") + " | New branch: n | Reset: g"
+		return "Checkout: " + bracketedKey("space") + " | New branch: n | Reset: g | Keybindings: ?"
 	case focusHistory:
-		return "Checkout: " + bracketedKey("space") + " | Drop: d | Reset: g"
+		return "Checkout: " + bracketedKey("space") + " | Drop: d | Reset: g | Keybindings: ?"
 	default:
 		return ""
 	}
+}
+
+// truncateKeybindBar mirrors lazygit's own formatBindingInfos
+// (pkg/gui/options_map.go): the first " | "-separated entry always shows;
+// each following entry is added only while it still fits width, and the
+// first one that doesn't gets replaced with a trailing " | …" instead of
+// wrapping or getting cut off mid-entry.
+func truncateKeybindBar(bar string, width int) string {
+	if width <= 0 {
+		return bar
+	}
+	const sep = " | "
+	const ellipsis = "…"
+	entries := strings.Split(bar, sep)
+	var b strings.Builder
+	length := 0
+	for i, e := range entries {
+		textLen := lipgloss.Width(e)
+		if i > 0 && length+lipgloss.Width(sep)+textLen > width {
+			b.WriteString(sep + ellipsis)
+			break
+		}
+		if i > 0 {
+			b.WriteString(sep)
+			length += lipgloss.Width(sep)
+		}
+		b.WriteString(e)
+		length += textLen
+	}
+	return b.String()
 }
 
 // renderPanel is retained for tests that assert on explicit size behavior.
@@ -200,7 +235,7 @@ func (m Model) View() string {
 	right := lipgloss.JoinVertical(lipgloss.Left, diffPanel, logPanel)
 	main := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	keybindBarText := keybindBarFor(m.focus)
+	keybindBarText := truncateKeybindBar(keybindBarFor(m.focus), m.width-2) // -2 padding, matches lazygit's own margin
 	keybindText := keybindBarText
 	if m.selectMode {
 		keybindText = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).
