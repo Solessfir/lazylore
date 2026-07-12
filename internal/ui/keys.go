@@ -106,15 +106,26 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if item.isDir {
 					return m, m.toggleDirCollapse(item.path)
 				}
-				if item.staged {
+				path := item.change.Path
+				opKey := "stage:" + path
+				if m.pendingFileOps[opKey] {
+					// Previous stage/unstage on this path hasn't resolved yet.
+					return m, nil
+				}
+				wasStaged := item.staged
+				optimisticCmd := (&m).setFileStagedByPath(path, wasStaged, !wasStaged)
+				(&m).setPendingFileOp(opKey, true)
+				if wasStaged {
 					return m, tea.Batch(
+						optimisticCmd,
 						func() tea.Msg { return setAppStatusMsg("Unstaging...") },
-						unstageCmd(m.runner, item.change.Path),
+						unstageCmd(m.runner, path),
 					)
 				}
 				return m, tea.Batch(
+					optimisticCmd,
 					func() tea.Msg { return setAppStatusMsg("Staging...") },
-					stageCmd(m.runner, item.change.Path),
+					stageCmd(m.runner, path),
 				)
 			}
 		case focusBranches:
@@ -207,9 +218,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "L":
 		if m.focus == focusFiles {
 			if item, ok := m.files.SelectedItem().(fileItem); ok && !item.isDir {
+				path := item.change.Path
+				opKey := "lock:" + path
+				if m.pendingFileOps[opKey] {
+					// Previous lock toggle on this path hasn't resolved yet.
+					return m, nil
+				}
+				wasLocked := item.locked
+				optimisticCmd := (&m).setFileLockedByPath(path, !wasLocked)
+				(&m).setPendingFileOp(opKey, true)
 				return m, tea.Batch(
+					optimisticCmd,
 					func() tea.Msg { return setAppStatusMsg("Updating lock...") },
-					lockToggleCmd(m.runner, item.change.Path, item.locked),
+					lockToggleCmd(m.runner, path, wasLocked),
 				)
 			}
 		}

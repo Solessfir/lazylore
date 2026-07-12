@@ -76,26 +76,31 @@ func loadLocksCmd(r lore.Runner, paths []string) tea.Cmd {
 
 func lockToggleCmd(r lore.Runner, path string, locked bool) tea.Cmd {
 	return func() tea.Msg {
+		opKey := "lock:" + path
 		if locked {
 			_, err := lore.LockRelease(r, path)
-			return actionDoneMsg{label: "unlock " + path, err: err}
+			return actionDoneMsg{label: "unlock " + path, err: err, opKey: opKey,
+				revert: func(m *Model) { m.setFileLockedByPath(path, true) }}
 		}
 		_, err := lore.LockAcquire(r, path)
-		return actionDoneMsg{label: "lock " + path, err: err}
+		return actionDoneMsg{label: "lock " + path, err: err, opKey: opKey,
+			revert: func(m *Model) { m.setFileLockedByPath(path, false) }}
 	}
 }
 
 func stageCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := lore.Stage(r, path)
-		return actionDoneMsg{label: "stage " + path, err: err}
+		return actionDoneMsg{label: "stage " + path, err: err, opKey: "stage:" + path,
+			revert: func(m *Model) { m.setFileStagedByPath(path, true, false) }}
 	}
 }
 
 func unstageCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := lore.Unstage(r, path)
-		return actionDoneMsg{label: "unstage " + path, err: err}
+		return actionDoneMsg{label: "unstage " + path, err: err, opKey: "stage:" + path,
+			revert: func(m *Model) { m.setFileStagedByPath(path, false, true) }}
 	}
 }
 

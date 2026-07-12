@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -292,6 +293,84 @@ func TestModel_LKeyOnLockedFileReleasesLock(t *testing.T) {
 	runBatch(cmd)
 	if len(fake.Calls) != 1 || fake.Calls[0][1] != "lock" || fake.Calls[0][2] != "release" {
 		t.Fatalf("Calls = %+v, want a single lock release call", fake.Calls)
+	}
+}
+
+func TestModel_SpaceOnFileOptimisticallyFlipsStagedBeforeCommandResolves(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json stage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+
+	updated, cmd := m2.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m3 := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd for space on a file")
+	}
+	item, ok := m3.files.SelectedItem().(fileItem)
+	if !ok || !item.staged {
+		t.Fatalf("expected the file to show as staged immediately, before stageCmd resolves, got %+v", item)
+	}
+	if len(fake.Calls) != 0 {
+		t.Fatalf("Calls = %+v, want none yet - the real command only runs once its Cmd is invoked", fake.Calls)
+	}
+}
+
+func TestModel_SecondSpacePressOnSamePathWhilePendingIsNoOp(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json stage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m3 := updated.(Model)
+
+	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m4 := updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected a nil Cmd for a second space press while the first stage is still pending")
+	}
+	item, ok := m4.files.SelectedItem().(fileItem)
+	if !ok || !item.staged {
+		t.Fatalf("expected the file to stay staged (no flip-back) while pending, got %+v", item)
+	}
+}
+
+func TestModel_FailedStageRevertsOptimisticFlipAndClearsPending(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m3 := updated.(Model)
+
+	// Simulate the background stageCmd failing - feed Update the same shape
+	// of actionDoneMsg it would have produced, without going through the
+	// returned Cmd (see TestStageCmd_RevertFlipsFileBackToUnstaged in
+	// commands_test.go for the Cmd's own opKey/revert wiring).
+	updated, _ = m3.Update(actionDoneMsg{
+		label: "stage a.txt",
+		err:   errors.New("boom"),
+		opKey: "stage:a.txt",
+		revert: func(mm *Model) {
+			mm.setFileStagedByPath("a.txt", true, false)
+		},
+	})
+	m4 := updated.(Model)
+
+	item, ok := m4.files.SelectedItem().(fileItem)
+	if !ok || item.staged {
+		t.Fatalf("expected the optimistic flip to be reverted after failure, got %+v", item)
+	}
+	if m4.pendingFileOps["stage:a.txt"] {
+		t.Fatal("expected pendingFileOps to be cleared once the action resolved")
+	}
+	if _, cmd := m4.Update(tea.KeyMsg{Type: tea.KeySpace}); cmd == nil {
+		t.Fatal("expected space to work again now that the pending flag is cleared")
 	}
 }
 

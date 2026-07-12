@@ -55,6 +55,12 @@ type Model struct {
 	selectMode           bool   // mouse capture dropped so the terminal can select text (mirrors lazyp4)
 	showHelp             bool   // "?" keybindings popup (see modal.go), mirrors lazyp4's own help overlay
 
+	// pendingFileOps guards optimistic-UI re-entrancy: "stage:"+path or
+	// "lock:"+path while that path's background lore command is still in
+	// flight. A second toggle on the same path while one is pending is a
+	// no-op rather than firing a second overlapping lore call.
+	pendingFileOps map[string]bool
+
 	status        lore.Status
 	revisions     []lore.Revision      // last-loaded History list; kept so statusMsg (which can arrive before or after historyMsg) can recompute unpushed coloring on its own
 	collapsedDirs map[string]bool      // Files-panel tree: which directory paths are closed
@@ -366,12 +372,65 @@ func (m *Model) toggleDirCollapse(path string) tea.Cmd {
 	return cmd
 }
 
+// setPendingFileOp marks (or clears) a "stage:"/"lock:" + path key as
+// having a background command in flight, guarding optimistic-UI
+// re-entrancy (see pendingFileOps).
+func (m *Model) setPendingFileOp(key string, pending bool) {
+	if m.pendingFileOps == nil {
+		m.pendingFileOps = map[string]bool{}
+	}
+	if pending {
+		m.pendingFileOps[key] = true
+	} else {
+		delete(m.pendingFileOps, key)
+	}
+}
+
+// setFileStagedByPath flips the Files-panel row for path currently at
+// `from` staged-state to `to`, for optimistic UI: space toggles the color
+// instantly, before the actual lore stage/unstage call (see
+// stageCmd/unstageCmd) even starts. The row is identified by (path, staged)
+// rather than path alone, since a path can appear as both a staged and an
+// unstaged row simultaneously (see buildFileTree) - matching staged too
+// picks the right one.
+func (m *Model) setFileStagedByPath(path string, from, to bool) tea.Cmd {
+	items := m.files.Items()
+	for i, it := range items {
+		fi, ok := it.(fileItem)
+		if !ok || fi.isDir || fi.change.Path != path || fi.staged != from {
+			continue
+		}
+		fi.staged = to
+		return m.files.SetItem(i, fi)
+	}
+	return nil
+}
+
+// setFileLockedByPath flips the lock badge on every Files-panel row for
+// path (a path can appear as both a staged and an unstaged row - see
+// buildFileTree - and a lore lock is a per-path property, not per-row, so
+// both need updating together).
+func (m *Model) setFileLockedByPath(path string, locked bool) tea.Cmd {
+	var cmd tea.Cmd
+	items := m.files.Items()
+	for i, it := range items {
+		fi, ok := it.(fileItem)
+		if !ok || fi.isDir || fi.change.Path != path {
+			continue
+		}
+		fi.locked = locked
+		cmd = m.files.SetItem(i, fi)
+	}
+	return cmd
+}
+
 func NewModel(r lore.Runner, repoName, repoRoot string) Model {
 	m := Model{
-		runner:        r,
-		repoName:      repoName,
-		repoRoot:      repoRoot,
-		collapsedDirs: map[string]bool{},
+		runner:         r,
+		repoName:       repoName,
+		repoRoot:       repoRoot,
+		collapsedDirs:  map[string]bool{},
+		pendingFileOps: map[string]bool{},
 		// focusFiles is the initial focus, below. width is 0 until the first
 		// resize() - fine, syncFocusDelegates rebuilds these once real
 		// dimensions are known.
@@ -755,7 +814,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case actionDoneMsg:
 		m.appStatus = ""
+		if msg.opKey != "" {
+			(&m).setPendingFileOp(msg.opKey, false)
+		}
 		if msg.err != nil {
+			if msg.revert != nil {
+				msg.revert(&m)
+			}
 			m.log.Append(msg.label + ": FAILED: " + msg.err.Error())
 			m.err = msg.err
 			return m, nil

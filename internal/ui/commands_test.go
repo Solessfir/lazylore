@@ -98,6 +98,87 @@ func TestStageCmd_CallsRunnerAndReturnsActionDoneMsg(t *testing.T) {
 	}
 }
 
+func TestStageCmd_RevertFlipsFileBackToUnstagedOnFailure(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json stage hello.txt": {ExitCode: 1, Stdout: `{"tagName":"complete","data":{"status":-1,"error":{"errorCode":-1,"message":"conflict","traceLocations":[]}}}` + "\n"},
+	}}
+	msg := stageCmd(fake, "hello.txt")()
+	am, ok := msg.(actionDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %#v, want actionDoneMsg", msg)
+	}
+	if am.err == nil {
+		t.Fatal("expected an error")
+	}
+	if am.opKey != "stage:hello.txt" {
+		t.Fatalf("opKey = %q, want %q", am.opKey, "stage:hello.txt")
+	}
+	if am.revert == nil {
+		t.Fatal("expected a non-nil revert func on failure")
+	}
+
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Staged: []lore.FileChange{{Status: 'M', Path: "hello.txt"}}}})
+	m2 := updated.(Model)
+	am.revert(&m2)
+	item, ok := m2.files.SelectedItem().(fileItem)
+	if !ok || item.staged {
+		t.Fatalf("expected hello.txt flipped back to unstaged after revert, got %+v", item)
+	}
+}
+
+func TestUnstageCmd_RevertFlipsFileBackToStagedOnFailure(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json unstage hello.txt": {ExitCode: 1, Stdout: `{"tagName":"complete","data":{"status":-1,"error":{"errorCode":-1,"message":"boom","traceLocations":[]}}}` + "\n"},
+	}}
+	msg := unstageCmd(fake, "hello.txt")()
+	am, ok := msg.(actionDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %#v, want actionDoneMsg", msg)
+	}
+	if am.opKey != "stage:hello.txt" {
+		t.Fatalf("opKey = %q, want %q", am.opKey, "stage:hello.txt")
+	}
+	if am.revert == nil {
+		t.Fatal("expected a non-nil revert func on failure")
+	}
+
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "hello.txt"}}}})
+	m2 := updated.(Model)
+	am.revert(&m2)
+	item, ok := m2.files.SelectedItem().(fileItem)
+	if !ok || !item.staged {
+		t.Fatalf("expected hello.txt flipped back to staged after revert, got %+v", item)
+	}
+}
+
+func TestLockToggleCmd_AcquireRevertsLockedFlagOnFailure(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json lock acquire hello.txt": {ExitCode: 1, Stdout: `{"tagName":"complete","data":{"status":-1,"error":{"errorCode":-1,"message":"boom","traceLocations":[]}}}` + "\n"},
+	}}
+	msg := lockToggleCmd(fake, "hello.txt", false)()
+	am, ok := msg.(actionDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %#v, want actionDoneMsg", msg)
+	}
+	if am.opKey != "lock:hello.txt" {
+		t.Fatalf("opKey = %q, want %q", am.opKey, "lock:hello.txt")
+	}
+	if am.revert == nil {
+		t.Fatal("expected a non-nil revert func on failure")
+	}
+
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "hello.txt"}}}})
+	m2 := updated.(Model)
+	am.revert(&m2)
+	item, ok := m2.files.SelectedItem().(fileItem)
+	if !ok || item.locked {
+		t.Fatalf("expected hello.txt flipped back to unlocked after a failed acquire, got %+v", item)
+	}
+}
+
 func TestDiscardAllCmd_CallsRunnerForEveryPath(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json unstage a.txt b.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},

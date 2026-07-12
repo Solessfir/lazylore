@@ -36,9 +36,19 @@ type diffMsg struct {
 	raw  bool
 }
 
+// actionDoneMsg reports a background lore command's result. opKey and
+// revert are only set by actions that flipped something in the UI
+// optimistically (see model.go's setFileStagedByPath/setFileLockedByPath)
+// before this message arrived: opKey (if non-empty) is cleared from
+// pendingFileOps regardless of outcome, and revert (if non-nil) is run to
+// undo the optimistic flip when err != nil - a real refresh already
+// reconciles the success case, but a failure never triggers one, so the
+// optimistic guess has to be walked back by hand.
 type actionDoneMsg struct {
-	label string
-	err   error
+	label  string
+	err    error
+	opKey  string
+	revert func(*Model)
 }
 
 type editorDoneMsg struct {
