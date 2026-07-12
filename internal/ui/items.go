@@ -30,14 +30,12 @@ var (
 // inconsistent across terminals, which made the badge visually misaligned.
 const lockBadge = "[L]"
 
-// lockBadgeStyle colors the badge by ownership: a lock you hold yourself is
-// informational (not a warning - purple, distinct from every other status
-// color already in use: white unstaged, green staged, blue/cyan selection),
-// while a lock held by someone else keeps the yellow warning color, since
-// that's the case that actually blocks you.
+// lockBadgeStyle colors the badge by ownership: green for a lock you hold
+// yourself (safe, informational), yellow for someone else's (the case that
+// actually blocks you).
 func lockBadgeStyle(lockedByMe bool) lipgloss.Style {
 	if lockedByMe {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
 }
