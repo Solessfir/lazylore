@@ -218,5 +218,17 @@ func (m Model) View() string {
 		bottom = lipgloss.JoinVertical(lipgloss.Left, footer, keybind)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, main, bottom)
+	full := lipgloss.JoinVertical(lipgloss.Left, main, bottom)
+
+	// Prompts, confirmations, and the "?" keybindings list render as a
+	// centered popup on top of the full screen (see modal.go/overlay.go),
+	// matching lazyp4's own modal treatment instead of a cramped footer line.
+	if m.showHelp {
+		return overlayCenter(m.renderHelpModal(), full, m.width, m.height)
+	}
+	if m.prompt != promptNone {
+		return overlayCenter(m.renderPromptModal(), full, m.width, m.height)
+	}
+
+	return full
 }

@@ -403,6 +403,57 @@ func TestModel_AnyKeyExitsSelectModeAndRestoresMouse(t *testing.T) {
 	}
 }
 
+func TestModel_QuestionMarkKeyOpensHelp(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m2 := updated.(Model)
+	if !m2.showHelp {
+		t.Fatal("expected showHelp = true after '?'")
+	}
+}
+
+func TestModel_AnyKeyClosesHelp(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m3 := updated.(Model)
+	if m3.showHelp {
+		t.Fatal("expected showHelp = false after any key")
+	}
+}
+
+func TestModel_QuestionMarkAgainClosesHelp(t *testing.T) {
+	// '?' both opens (via handleKey, only reached when showHelp is already
+	// false) and closes (caught by the any-key-closes branch in Update
+	// before handleKey ever sees it again) - a plain toggle.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m3 := updated.(Model)
+	if m3.showHelp {
+		t.Fatal("expected showHelp = false after a second '?'")
+	}
+}
+
+func TestModel_MouseClickIgnoredWhileHelpOpen(t *testing.T) {
+	// A popup covers the whole screen - clicks must not reach panels
+	// underneath it (e.g. silently changing focus or list selection).
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.width, m.height = 100, 40
+	(&m).resize()
+	m.showHelp = true
+
+	updated, _ := m.handleMouseClick(tea.MouseMsg{X: 5, Y: 5, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m2 := updated.(Model)
+	if m2.focus != m.focus {
+		t.Fatalf("focus changed to %v from a click while help was open, want unchanged %v", m2.focus, m.focus)
+	}
+}
+
 func TestModel_VKeyWhileFilteringGoesToFilterInputNotSelectMode(t *testing.T) {
 	// Regression: 'v' used to be checked before the filter-typing bypass,
 	// so it hijacked the keystroke instead of reaching the filter box -

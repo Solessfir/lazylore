@@ -43,6 +43,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.selectMode = true
 		return m, tea.DisableMouse
 
+	case "?":
+		m.showHelp = true
+		return m, nil
+
 	case "tab", "l":
 		m.focus = (m.focus + 1) % 4
 		m.syncFocusDelegates()
@@ -83,6 +87,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prompt = promptCommit
 		m.input = textinput.New()
 		m.input.Placeholder = "commit message"
+		m.input.Width = 50
 		m.input.Focus()
 		return m, textinput.Blink
 
@@ -90,6 +95,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prompt = promptNewBranch
 		m.input = textinput.New()
 		m.input.Placeholder = "branch name"
+		m.input.Width = 40
 		m.input.Focus()
 		return m, textinput.Blink
 

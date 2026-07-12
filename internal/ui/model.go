@@ -51,8 +51,9 @@ type Model struct {
 	input                textinput.Model
 	pendingDiscardPath   string
 	pendingResetRevision string // revision `g` (branch reset) will target once confirmed
-	pendingResetLabel    string // human phrase for the confirm footer + command log, e.g. "Reset current branch to main"
+	pendingResetLabel    string // human phrase for the confirm popup + command log, e.g. "Reset current branch to main"
 	selectMode           bool   // mouse capture dropped so the terminal can select text (mirrors lazyp4)
+	showHelp             bool   // "?" keybindings popup (see modal.go), mirrors lazyp4's own help overlay
 
 	status        lore.Status
 	revisions     []lore.Revision      // last-loaded History list; kept so statusMsg (which can arrive before or after historyMsg) can recompute unpushed coloring on its own
@@ -196,6 +197,10 @@ func rowClickTarget(page, perPage int, vis []list.Item, relY int) (int, bool) {
 // Diff viewport also receives mouse events for scrolling.
 func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+	if m.prompt != promptNone || m.showHelp {
+		// A popup is covering the screen - clicks shouldn't reach the panels underneath.
 		return m, nil
 	}
 
@@ -547,23 +552,15 @@ func (m *Model) refreshBranchesList() tea.Cmd {
 	return cmd
 }
 
+// currentFooter is the spanning footer line above the keybind bar. Prompts
+// and confirmations now render as centered popups (see modal.go) instead of
+// living here, matching lazyp4 - this is left for the error line only. The
+// command log itself lives in its own panel under Diff (like lazygit extras).
 func (m Model) currentFooter() string {
-	switch {
-	case m.prompt == promptConfirmDiscard:
-		return "Discard changes to " + m.pendingDiscardPath + "? (y/N)"
-	case m.prompt == promptConfirmDiscardAll:
-		return "Discard ALL changes in the working tree? (y/N)"
-	case m.prompt == promptConfirmBranchReset || m.prompt == promptConfirmRevert:
-		return m.pendingResetLabel + "? (y/N)"
-	case m.prompt != promptNone:
-		return m.input.View()
-	case m.err != nil:
-		// Error goes in the spanning footer area. The command log itself now
-		// lives in its own panel under Diff (like lazygit extras).
+	if m.err != nil {
 		return errorStyle.Render(m.err.Error())
-	default:
-		return ""
 	}
+	return ""
 }
 
 // ensureMainContent returns a command to (re)load the shared main panel's
@@ -657,6 +654,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Any key exits select mode and restores mouse capture.
 			m.selectMode = false
 			return m, tea.EnableMouseCellMotion
+		}
+		if m.showHelp {
+			// Any key closes the help popup (matches lazyp4's own overlay).
+			m.showHelp = false
+			return m, nil
 		}
 		if m.prompt != promptNone {
 			return m.handlePromptKey(msg)
