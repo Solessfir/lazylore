@@ -198,8 +198,16 @@ func SyncTo(r Runner, revision string) (Result, error) {
 // Auto-commits when the revert is clean (lore's own default); a conflicting
 // revert surfaces as a runChecked error here rather than dropping into
 // lore's resolve/abort sub-flow, which lazylore has no UI for.
-func RevertRevision(r Runner, revision string) (Result, error) {
-	return runChecked(r, "revision", "revert", revision)
+// message (when non-empty) becomes the auto-commit's message via lore's own
+// `--message` flag (lore-client/src/cli/commands/revision.rs's
+// RevisionRevertArgs.message) - without it lore commits with no message at
+// all, unlike git revert's own "Revert \"<subject>\"" default.
+func RevertRevision(r Runner, revision, message string) (Result, error) {
+	args := []string{"revision", "revert", revision}
+	if message != "" {
+		args = append(args, "--message", message)
+	}
+	return runChecked(r, args...)
 }
 
 func Commit(r Runner, message string) (Result, error) {

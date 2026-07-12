@@ -52,6 +52,7 @@ type Model struct {
 	pendingDiscardPath   string
 	pendingResetRevision string // revision `g` (branch reset) will target once confirmed
 	pendingResetLabel    string // human phrase for the confirm popup + command log, e.g. "Reset current branch to main"
+	pendingRevertMessage string // auto-commit message `d` (Drop/revert) will pass to lore, e.g. `Revert "oops"`
 	selectMode           bool   // mouse capture dropped so the terminal can select text (mirrors lazyp4)
 	showHelp             bool   // "?" keybindings popup (see modal.go), mirrors lazyp4's own help overlay
 

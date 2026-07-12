@@ -80,6 +80,9 @@ func TestModel_DKeyOnHistoryOpensRevertConfirmWithRevisionHash(t *testing.T) {
 	if m3.pendingResetRevision != "abcdef1234567890" {
 		t.Fatalf("pendingResetRevision = %q, want the full hash", m3.pendingResetRevision)
 	}
+	if want := `Revert "oops"`; m3.pendingRevertMessage != want {
+		t.Fatalf("pendingRevertMessage = %q, want %q", m3.pendingRevertMessage, want)
+	}
 	if cmd != nil {
 		t.Fatalf("expected no Cmd yet (confirmation pending), got %v", cmd)
 	}
@@ -87,7 +90,7 @@ func TestModel_DKeyOnHistoryOpensRevertConfirmWithRevisionHash(t *testing.T) {
 
 func TestModel_YKeyConfirmsRevert(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json revision revert abcdef12": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		`--json revision revert abcdef12 --message Revert "oops"`: {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	m.focus = focusHistory
@@ -107,6 +110,9 @@ func TestModel_YKeyConfirmsRevert(t *testing.T) {
 	runBatch(cmd)
 	if len(fake.Calls) != 1 || fake.Calls[0][1] != "revision" || fake.Calls[0][2] != "revert" || fake.Calls[0][3] != "abcdef12" {
 		t.Fatalf("Calls = %+v, want a single revision revert call", fake.Calls)
+	}
+	if fake.Calls[0][4] != "--message" || fake.Calls[0][5] != `Revert "oops"` {
+		t.Fatalf("Calls[0] = %+v, want a trailing --message %q", fake.Calls[0], `Revert "oops"`)
 	}
 }
 

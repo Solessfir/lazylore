@@ -163,6 +163,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prompt = promptConfirmRevert
 				m.pendingResetRevision = item.revision.Hash
 				m.pendingResetLabel = "Revert revision " + shortHash(item.revision.Hash)
+				m.pendingRevertMessage = revertCommitMessage(item.revision.Message)
 			}
 		}
 		return m, nil
@@ -319,12 +320,14 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prompt = promptNone
 		revision := m.pendingResetRevision
 		label := m.pendingResetLabel
+		message := m.pendingRevertMessage
 		m.pendingResetRevision = ""
 		m.pendingResetLabel = ""
+		m.pendingRevertMessage = ""
 		if msg.String() == "y" {
 			return m, tea.Batch(
 				func() tea.Msg { return setAppStatusMsg("Reverting...") },
-				revertCmd(m.runner, revision, label),
+				revertCmd(m.runner, revision, message, label),
 			)
 		}
 		return m, nil

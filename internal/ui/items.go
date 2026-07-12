@@ -250,6 +250,18 @@ func shortHash(h string) string {
 	return h
 }
 
+// revertCommitMessage builds the auto-commit message lore.RevertRevision
+// passes via --message for a Drop (see keys.go's "d" on focusHistory),
+// matching git revert's own default of naming what was undone rather than
+// leaving the new revision's message blank. Empty when the reverted
+// revision itself had no message to quote.
+func revertCommitMessage(original string) string {
+	if original == "" {
+		return ""
+	}
+	return `Revert "` + original + `"`
+}
+
 // formatBranchLog renders a branch's revision list as plain colored text
 // for the main panel's "Log" view (Branches focused) - one line per
 // revision, matching the History panel's own hash/author/message styling.

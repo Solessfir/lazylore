@@ -225,11 +225,21 @@ func TestSyncTo_BuildsArgs(t *testing.T) {
 	}
 }
 
-func TestRevertRevision_BuildsArgs(t *testing.T) {
+func TestRevertRevision_BuildsArgsWithoutMessage(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json revision revert abc123": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
-	_, err := lore.RevertRevision(fake, "abc123")
+	_, err := lore.RevertRevision(fake, "abc123", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRevertRevision_BuildsArgsWithMessageFlag(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		`--json revision revert abc123 --message Revert "oops"`: {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	_, err := lore.RevertRevision(fake, "abc123", `Revert "oops"`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -242,7 +252,7 @@ func TestRevertRevision_SurfacesConflictAsError(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json revision revert abc123": {ExitCode: 1, Stdout: `{"tagName":"complete","data":{"status":-1,"error":{"errorCode":-1,"message":"revert conflict","traceLocations":[]}}}` + "\n"},
 	}}
-	_, err := lore.RevertRevision(fake, "abc123")
+	_, err := lore.RevertRevision(fake, "abc123", "")
 	if err == nil {
 		t.Fatal("expected an error when the revert reports a failure")
 	}
