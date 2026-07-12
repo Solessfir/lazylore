@@ -389,6 +389,50 @@ func TestModel_LKeyOnLockedFileReleasesLock(t *testing.T) {
 	}
 }
 
+func TestModel_LockConfirmUpdatesLocksMapBeforeRefreshRebuildsItems(t *testing.T) {
+	// Regression: after a successful lock acquire, refreshCmd's statusMsg
+	// rebuilds Files from m.locks - but its own loadLocksCmd (dispatched in
+	// that same handler) hasn't resolved yet, so without actionDoneMsg's
+	// confirm updating m.locks immediately, that rebuild used to run
+	// against the still-stale (pre-lock) m.locks and show the badge
+	// disappearing for a frame before the real loadLocksCmd caught up -
+	// the reported "[L] blinks" bug.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(currentUserMsg{id: "user-123"})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m3 := updated.(Model)
+
+	// Simulate lockToggleCmd's own success message (see commands.go) rather
+	// than running it through the real Runner - only the confirm wiring is
+	// under test here.
+	updated, _ = m3.Update(actionDoneMsg{
+		label: "Lock file",
+		opKey: "lock:a.txt",
+		confirm: func(mm *Model) {
+			if mm.locks == nil {
+				mm.locks = map[string]lore.Lock{}
+			}
+			mm.locks["a.txt"] = lore.Lock{Path: "a.txt", Owner: mm.currentUserID}
+		},
+	})
+	m4 := updated.(Model)
+
+	if _, locked := m4.locks["a.txt"]; !locked {
+		t.Fatal("expected confirm to have populated m.locks immediately, before any refresh")
+	}
+
+	// The statusMsg refreshCmd triggers next - it must rebuild Files using
+	// the now-current m.locks, not a stale copy.
+	updated, _ = m4.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m5 := updated.(Model)
+
+	item, ok := m5.files.SelectedItem().(fileItem)
+	if !ok || !item.locked || !item.lockedByMe {
+		t.Fatalf("expected a.txt to stay locked (and lockedByMe) through the refresh rebuild, got %+v", item)
+	}
+}
+
 func TestModel_SpaceOnFileOptimisticallyFlipsStagedBeforeCommandResolves(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json stage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},

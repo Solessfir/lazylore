@@ -130,11 +130,20 @@ func lockToggleCmd(r lore.Runner, path string, locked bool) tea.Cmd {
 		if locked {
 			_, err := lore.LockRelease(rr, path)
 			return actionDoneMsg{label: "Unlock file", err: err, opKey: opKey, commands: rr.commands,
-				revert: func(m *Model) { m.setFileLockedByPath(path, true) }}
+				revert:  func(m *Model) { m.setFileLockedByPath(path, true) },
+				confirm: func(m *Model) { delete(m.locks, path) },
+			}
 		}
 		_, err := lore.LockAcquire(rr, path)
 		return actionDoneMsg{label: "Lock file", err: err, opKey: opKey, commands: rr.commands,
-			revert: func(m *Model) { m.setFileLockedByPath(path, false) }}
+			revert: func(m *Model) { m.setFileLockedByPath(path, false) },
+			confirm: func(m *Model) {
+				if m.locks == nil {
+					m.locks = map[string]lore.Lock{}
+				}
+				m.locks[path] = lore.Lock{Path: path, Owner: m.currentUserID}
+			},
+		}
 	}
 }
 

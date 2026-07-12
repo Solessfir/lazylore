@@ -891,6 +891,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
+		if msg.confirm != nil {
+			msg.confirm(&m)
+		}
 		m.log.AppendAction(msg.label, msg.commands, nil)
 		return m, refreshCmd(m.runner)
 
