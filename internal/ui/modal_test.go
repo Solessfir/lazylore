@@ -57,7 +57,7 @@ func TestHelpContent_IncludesFocusedPanelAndGlobalSections(t *testing.T) {
 	if !strings.Contains(got, "Drop (revert) selected revision") {
 		t.Fatalf("helpContent() for focusHistory missing its local rows: %q", got)
 	}
-	if !strings.Contains(got, "Toggle this help") {
+	if !strings.Contains(got, "Close this help") {
 		t.Fatalf("helpContent() missing the Global section: %q", got)
 	}
 }

@@ -44,7 +44,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.DisableMouse
 
 	case "?":
-		m.showHelp = true
+		(&m).openHelp()
 		return m, nil
 
 	case "tab", "l":

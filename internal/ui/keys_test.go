@@ -497,22 +497,37 @@ func TestModel_QuestionMarkKeyOpensHelp(t *testing.T) {
 	}
 }
 
-func TestModel_AnyKeyClosesHelp(t *testing.T) {
+func TestModel_UnrecognizedKeyWhileHelpOpenScrollsInsteadOfClosing(t *testing.T) {
+	// Only esc/'?' close the popup now - everything else (including keys
+	// the viewport doesn't recognize) must leave it open so j/k/arrows can
+	// scroll a keybindings list too long to fit on screen.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
 	m2 := updated.(Model)
 
 	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	m3 := updated.(Model)
+	if !m3.showHelp {
+		t.Fatal("expected showHelp to stay true after an unrecognized key")
+	}
+}
+
+func TestModel_EscClosesHelp(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m3 := updated.(Model)
 	if m3.showHelp {
-		t.Fatal("expected showHelp = false after any key")
+		t.Fatal("expected showHelp = false after esc")
 	}
 }
 
 func TestModel_QuestionMarkAgainClosesHelp(t *testing.T) {
 	// '?' both opens (via handleKey, only reached when showHelp is already
-	// false) and closes (caught by the any-key-closes branch in Update
-	// before handleKey ever sees it again) - a plain toggle.
+	// false) and closes (caught explicitly in Update's showHelp branch) -
+	// a plain toggle.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
 	m2 := updated.(Model)
@@ -524,15 +539,38 @@ func TestModel_QuestionMarkAgainClosesHelp(t *testing.T) {
 	}
 }
 
+func TestModel_JKeyWhileHelpOpenScrollsViewport(t *testing.T) {
+	// A small terminal height caps the popup below the content's real line
+	// count (see openHelp), guaranteeing there's something to scroll.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.width, m.height = 100, 10
+	(&m).resize()
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m2 := updated.(Model)
+	startOffset := m2.helpViewport.YOffset
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m3 := updated.(Model)
+	if !m3.showHelp {
+		t.Fatal("expected showHelp to stay true after 'j'")
+	}
+	if m3.helpViewport.YOffset <= startOffset {
+		t.Fatalf("YOffset = %d, want it to have scrolled down from %d", m3.helpViewport.YOffset, startOffset)
+	}
+}
+
 func TestModel_MouseClickIgnoredWhileHelpOpen(t *testing.T) {
 	// A popup covers the whole screen - clicks must not reach panels
-	// underneath it (e.g. silently changing focus or list selection).
+	// underneath it (e.g. silently changing focus or list selection). Goes
+	// through Update (not handleMouseClick directly) since that's what
+	// actually routes MouseMsg to the help viewport instead - see Update's
+	// tea.MouseMsg case.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	m.width, m.height = 100, 40
 	(&m).resize()
 	m.showHelp = true
 
-	updated, _ := m.handleMouseClick(tea.MouseMsg{X: 5, Y: 5, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	updated, _ := m.Update(tea.MouseMsg{X: 5, Y: 5, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	m2 := updated.(Model)
 	if m2.focus != m.focus {
 		t.Fatalf("focus changed to %v from a click while help was open, want unchanged %v", m2.focus, m.focus)

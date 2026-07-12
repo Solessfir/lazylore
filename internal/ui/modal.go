@@ -102,7 +102,8 @@ func globalHelpRows() []helpRow {
 		{key: "/", desc: "Filter list"},
 		{key: "v", desc: "Select mode (release mouse to copy text)"},
 		{key: "q", desc: "Quit"},
-		{key: "?", desc: "Toggle this help"},
+		{key: "j/k / ↑/↓", desc: "Scroll this help (or mouse wheel)"},
+		{key: "?, esc", desc: "Close this help"},
 	}
 }
 
@@ -111,8 +112,8 @@ func globalHelpRows() []helpRow {
 // lazylore's answer to lazygit falling back on "?" for a full list when a
 // binding isn't in the bottom bar.
 func (m Model) helpContent() string {
-	key := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	key := lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true) // blue
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))            // white
 	hdr := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 	var rows []helpRow
@@ -140,7 +141,10 @@ func (m Model) helpContent() string {
 	return sb.String()
 }
 
-// renderHelpModal renders the "?" keybindings overlay as a popup.
+// renderHelpModal renders the "?" keybindings overlay as a popup: a titled
+// bordered box (title embedded in the top border, like every other panel -
+// see titles.go's renderTitledPanel) wrapping a scrollable viewport, rather
+// than the plain title-as-first-line box the other prompts use.
 func (m Model) renderHelpModal() string {
-	return renderModal("Keybindings", m.helpContent(), "press any key to close")
+	return renderTitledPanel(true, m.helpViewport.Width, m.helpViewport.Height, "", "Keybindings", m.helpViewport.View())
 }

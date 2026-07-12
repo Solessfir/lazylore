@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -50,11 +51,12 @@ type Model struct {
 	prompt               promptKind
 	input                textinput.Model
 	pendingDiscardPath   string
-	pendingResetRevision string // revision `g` (branch reset) will target once confirmed
-	pendingResetLabel    string // human phrase for the confirm popup + command log, e.g. "Reset current branch to main"
-	pendingRevertMessage string // auto-commit message `d` (Drop/revert) will pass to lore, e.g. `Revert "oops"`
-	selectMode           bool   // mouse capture dropped so the terminal can select text (mirrors lazyp4)
-	showHelp             bool   // "?" keybindings popup (see modal.go), mirrors lazyp4's own help overlay
+	pendingResetRevision string         // revision `g` (branch reset) will target once confirmed
+	pendingResetLabel    string         // human phrase for the confirm popup + command log, e.g. "Reset current branch to main"
+	pendingRevertMessage string         // auto-commit message `d` (Drop/revert) will pass to lore, e.g. `Revert "oops"`
+	selectMode           bool           // mouse capture dropped so the terminal can select text (mirrors lazyp4)
+	showHelp             bool           // "?" keybindings popup (see modal.go), mirrors lazyp4's own help overlay
+	helpViewport         viewport.Model // scrolls the keybindings popup's body (j/k/arrows/mouse wheel via its own default keymap)
 
 	// pendingFileOps guards optimistic-UI re-entrancy: "stage:"+path or
 	// "lock:"+path while that path's background lore command is still in
@@ -206,8 +208,9 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 		return m, nil
 	}
-	if m.prompt != promptNone || m.showHelp {
+	if m.prompt != promptNone {
 		// A popup is covering the screen - clicks shouldn't reach the panels underneath.
+		// (showHelp's own MouseMsg never reaches here - see Update.)
 		return m, nil
 	}
 
@@ -373,6 +376,26 @@ func (m *Model) toggleDirCollapse(path string) tea.Cmd {
 	return cmd
 }
 
+// openHelp builds the "?" keybindings popup's content for the currently
+// focused panel and sizes its viewport to fit the content (capped to the
+// terminal, so it never overflows on a small window).
+func (m *Model) openHelp() {
+	m.showHelp = true
+	content := m.helpContent()
+	lines := strings.Split(content, "\n")
+	longest := 0
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > longest {
+			longest = w
+		}
+	}
+	m.helpViewport = viewport.New(
+		min(longest, max(20, m.width-8)),
+		min(len(lines), max(3, m.height-6)),
+	)
+	m.helpViewport.SetContent(content)
+}
+
 // setPendingFileOp marks (or clears) a "stage:"/"lock:" + path key as
 // having a background command in flight, guarding optimistic-UI
 // re-entrancy (see pendingFileOps).
@@ -534,6 +557,14 @@ func (m *Model) resize() {
 	// (see newListDelegate) rather than read live, so it has to be rebuilt
 	// whenever panelWidth changes here, not just on focus changes.
 	m.syncFocusDelegates()
+
+	if m.showHelp {
+		// Re-fit the keybindings popup to the new terminal size. Content is
+		// deterministic from m.focus (unaffected by resize), so a full
+		// rebuild is simplest - it does lose scroll position, an acceptable
+		// cost for the rare case of resizing mid-popup.
+		m.openHelp()
+	}
 }
 
 // recomputePanelHeights calculates the base inner heights for all panels
@@ -707,6 +738,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
+		if m.showHelp {
+			// Forward for mouse-wheel scrolling (viewport.Model handles it
+			// via its own MouseWheelEnabled default) - other clicks harmlessly
+			// no-op inside the viewport rather than reaching panels underneath.
+			var cmd tea.Cmd
+			m.helpViewport, cmd = m.helpViewport.Update(msg)
+			return m, cmd
+		}
 		return m.handleMouseClick(msg)
 
 	case tea.KeyMsg:
@@ -716,9 +755,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.EnableMouseCellMotion
 		}
 		if m.showHelp {
-			// Any key closes the help popup (matches lazyp4's own overlay).
-			m.showHelp = false
-			return m, nil
+			switch msg.String() {
+			case "esc", "?":
+				m.showHelp = false
+				return m, nil
+			}
+			// Everything else (j/k, arrows, pgup/pgdown, ...) scrolls the
+			// popup - viewport.Model's own default keymap handles it;
+			// unrecognized keys are a harmless no-op inside it.
+			var cmd tea.Cmd
+			m.helpViewport, cmd = m.helpViewport.Update(msg)
+			return m, cmd
 		}
 		if m.prompt != promptNone {
 			return m.handlePromptKey(msg)
