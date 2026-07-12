@@ -175,6 +175,31 @@ func unstageCmd(r lore.Runner, path string) tea.Cmd {
 	}
 }
 
+// dirStageCmd is stageCmd's recursive analog for a directory/root row (see
+// Model.toggleDirStage): lore stage on a directory path recurses over every
+// already-dirty file under it, so a failed call needs its revert to flip
+// every optimistically-updated row back, not just one path - dirPath is the
+// fileItem-space prefix ("" for the root row) used for that revert, while
+// lorePath is the actual lore CLI argument ("." for the root row, since
+// lore has no path for the synthetic root).
+func dirStageCmd(r lore.Runner, dirPath, lorePath string) tea.Cmd {
+	return func() tea.Msg {
+		rr := &runRecorder{inner: r}
+		_, err := lore.Stage(rr, lorePath)
+		return actionDoneMsg{label: "Stage folder", err: err, opKey: "stage:" + lorePath, commands: rr.commands,
+			revert: func(m *Model) { m.setDirStagedByPrefix(dirPath, true, false) }}
+	}
+}
+
+func dirUnstageCmd(r lore.Runner, dirPath, lorePath string) tea.Cmd {
+	return func() tea.Msg {
+		rr := &runRecorder{inner: r}
+		_, err := lore.Unstage(rr, lorePath)
+		return actionDoneMsg{label: "Unstage folder", err: err, opKey: "stage:" + lorePath, commands: rr.commands,
+			revert: func(m *Model) { m.setDirStagedByPrefix(dirPath, false, true) }}
+	}
+}
+
 func resetCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}

@@ -459,6 +459,100 @@ func (m *Model) setFileLockedByPath(path string, locked bool) tea.Cmd {
 	return cmd
 }
 
+// dirPrefixMatches reports whether filePath sits under dirPath: an exact
+// match, or nested inside it. dirPath == "" matches every path - the root
+// "/" row covers the whole tree.
+func dirPrefixMatches(dirPath, filePath string) bool {
+	if dirPath == "" {
+		return true
+	}
+	return filePath == dirPath || strings.HasPrefix(filePath, dirPath+"/")
+}
+
+// dirStageCounts reports whether any file under dirPath is currently
+// unstaged and/or staged, for toggleDirStage's lazygit-style decision
+// (stage if anything's unstaged, else unstage).
+func (m Model) dirStageCounts(dirPath string) (hasUnstaged, hasStaged bool) {
+	for _, it := range m.files.Items() {
+		fi, ok := it.(fileItem)
+		if !ok || fi.isDir || !dirPrefixMatches(dirPath, fi.change.Path) {
+			continue
+		}
+		if fi.staged {
+			hasStaged = true
+		} else {
+			hasUnstaged = true
+		}
+	}
+	return hasUnstaged, hasStaged
+}
+
+// setDirStagedByPrefix is setFileStagedByPath's recursive analog: flips
+// every Files-panel row under dirPath (see dirPrefixMatches) currently
+// staged as `from` over to `to`, for space on a directory/root row's
+// optimistic UI (see toggleDirStage).
+func (m *Model) setDirStagedByPrefix(dirPath string, from, to bool) tea.Cmd {
+	var cmds []tea.Cmd
+	items := m.files.Items()
+	for i, it := range items {
+		fi, ok := it.(fileItem)
+		if !ok || fi.isDir || fi.staged != from || !dirPrefixMatches(dirPath, fi.change.Path) {
+			continue
+		}
+		fi.staged = to
+		if cmd := m.files.SetItem(i, fi); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+// toggleDirStage handles space on a directory (or the root "/" row, path
+// ""): matches lazygit's own directory behavior (files_controller.go's
+// press/toggleStaged), not lazylore's old behavior of treating space on a
+// directory the same as Enter (collapse toggle - still Enter's job, see
+// keys.go). If anything under the directory is unstaged, stage all of it;
+// otherwise unstage everything staged under it; no-op if the directory has
+// no changes at all. lore stage/unstage accept a directory path directly
+// and recurse over already-dirty files under it without needing --scan
+// (lore-client's FileStageArgs doc: "without --scan, directory staging
+// stages only files already marked dirty under that directory" - exactly
+// the already-known-dirty files this tree is built from), so one call
+// covers the whole subtree; "." stands in for the repo root since lore has
+// no path for the synthetic "/" row itself.
+func (m *Model) toggleDirStage(dirPath string) tea.Cmd {
+	hasUnstaged, hasStaged := m.dirStageCounts(dirPath)
+	if !hasUnstaged && !hasStaged {
+		return nil
+	}
+
+	lorePath := dirPath
+	if lorePath == "" {
+		lorePath = "."
+	}
+	opKey := "stage:" + lorePath
+	if m.pendingFileOps[opKey] {
+		return nil
+	}
+	m.setPendingFileOp(opKey, true)
+
+	if hasUnstaged {
+		optimisticCmd := m.setDirStagedByPrefix(dirPath, false, true)
+		return tea.Batch(
+			optimisticCmd,
+			func() tea.Msg { return setAppStatusMsg("Staging...") },
+			dirStageCmd(m.runner, dirPath, lorePath),
+		)
+	}
+
+	optimisticCmd := m.setDirStagedByPrefix(dirPath, true, false)
+	return tea.Batch(
+		optimisticCmd,
+		func() tea.Msg { return setAppStatusMsg("Unstaging...") },
+		dirUnstageCmd(m.runner, dirPath, lorePath),
+	)
+}
+
 func NewModel(r lore.Runner, repoName, repoRoot string) Model {
 	m := Model{
 		runner:         r,

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -910,21 +911,33 @@ func TestModel_EnterOnDirectoryTogglesCollapseInsteadOfLoadingDiff(t *testing.T)
 	}
 }
 
-func TestModel_SpaceOnDirectoryTogglesCollapseInsteadOfStaging(t *testing.T) {
-	fake := &lore.FakeRunner{}
+func TestModel_SpaceOnDirectoryStagesEverythingUnderItRecursively(t *testing.T) {
+	// Matches lazygit's own Files-panel space key (files_controller.go's
+	// press/toggleStaged): space on a directory stages every unstaged file
+	// under it in one lore call, rather than colliding with Enter's collapse
+	// toggle (see TestModel_EnterOnDirectoryTogglesCollapseInsteadOfLoadingDiff).
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json stage src": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})
 	m2 := updated.(Model)
 
-	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m3 := updated.(Model)
-
-	if len(fake.Calls) != 0 {
-		t.Fatalf("Space on a directory should not dispatch any runner call, got %+v", fake.Calls)
+	item, ok := m2.files.SelectedItem().(fileItem)
+	if !ok || !item.isDir || item.path != "src" {
+		t.Fatalf("precondition failed: selected item = %+v, want the 'src' directory", item)
 	}
-	item, ok := m3.files.SelectedItem().(fileItem)
-	if !ok || !item.isDir || !item.collapsed {
-		t.Fatalf("expected 'src' to be collapsed after Space, got %+v", item)
+
+	updated, cmd := m2.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m3 := updated.(Model)
+	runBatch(cmd)
+
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage src" {
+		t.Fatalf("Space on 'src' should dispatch a single 'stage src' call, got %+v", fake.Calls)
+	}
+	item2, ok := m3.files.SelectedItem().(fileItem)
+	if !ok || !item2.isDir || item2.collapsed {
+		t.Fatalf("Space on a directory should not collapse it (that's Enter's job), got %+v", item2)
 	}
 }
 

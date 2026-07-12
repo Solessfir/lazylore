@@ -123,7 +123,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case focusFiles:
 			if item, ok := m.files.SelectedItem().(fileItem); ok {
 				if item.isDir {
-					return m, m.toggleDirCollapse(item.path)
+					return m, m.toggleDirStage(item.path)
 				}
 				path := item.change.Path
 				opKey := "stage:" + path
