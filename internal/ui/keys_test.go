@@ -595,6 +595,30 @@ func TestModel_FailedStageRevertsOptimisticFlipAndClearsPending(t *testing.T) {
 	}
 }
 
+func TestModel_ActionFailureOnlyLogsToCommandLogNotFooter(t *testing.T) {
+	// Regression: actionDoneMsg used to both append to the Command Log AND
+	// set m.err (rendered in currentFooter, near the keybind bar) - the
+	// same failure shown twice. m.err must stay untouched here; the
+	// Command Log is the only place this error should surface.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(actionDoneMsg{
+		label: "stage a.txt",
+		err:   errors.New("boom"),
+		opKey: "stage:a.txt",
+	})
+	m3 := updated.(Model)
+
+	if m3.err != nil {
+		t.Fatalf("m.err = %v, want nil - the error should only appear in the Command Log", m3.err)
+	}
+	if len(m3.log.entries) == 0 || m3.log.entries[len(m3.log.entries)-1].err == nil {
+		t.Fatal("expected the failure to have been appended to the Command Log")
+	}
+}
+
 func TestModel_ShiftDOnFilesOpensDiscardAllConfirmPrompt(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
@@ -991,6 +1015,40 @@ func TestModel_EnterOnDirectoryTogglesCollapseInsteadOfLoadingDiff(t *testing.T)
 	item2, ok := m3.files.SelectedItem().(fileItem)
 	if !ok || !item2.isDir || !item2.collapsed {
 		t.Fatalf("expected 'src' to be collapsed after Enter, got %+v", item2)
+	}
+}
+
+func TestModel_AKeyStagesEverythingRegardlessOfSelection(t *testing.T) {
+	// Matches lazygit's "a" (toggleStagedAll): same stage-if-anything's-
+	// unstaged-else-unstage rule as space on a directory, just always
+	// applied to the whole tree via toggleDirStage("") - "." is lore's
+	// repo-root path since there's no real path for the synthetic root row.
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json stage .": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{
+		{Status: 'M', Path: "a.txt"},
+		{Status: 'M', Path: "b.txt"},
+	}}})
+	m2 := updated.(Model)
+
+	// Select something other than root, to prove "a" doesn't depend on
+	// the current selection the way space does.
+	m2.files.Select(1)
+
+	updated, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m3 := updated.(Model)
+	runBatch(cmd)
+
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage ." {
+		t.Fatalf("'a' should dispatch a single 'stage .' call, got %+v", fake.Calls)
+	}
+	for _, it := range m3.files.Items() {
+		fi, ok := it.(fileItem)
+		if ok && !fi.isDir && !fi.staged {
+			t.Fatalf("expected every file staged optimistically after 'a', got %+v", fi)
+		}
 	}
 }
 

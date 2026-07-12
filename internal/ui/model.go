@@ -1028,8 +1028,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.revert != nil {
 				msg.revert(&m)
 			}
+			// Command Log already shows this error (AppendAction below) -
+			// don't also set m.err, or it'd duplicate into the footer via
+			// currentFooter().
 			m.log.AppendAction(msg.label, msg.commands, msg.err)
-			m.err = msg.err
 			return m, nil
 		}
 		if msg.confirm != nil {

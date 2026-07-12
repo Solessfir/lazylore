@@ -71,6 +71,7 @@ func (m Model) localHelpRows() []helpRow {
 	case focusFiles:
 		return []helpRow{
 			{key: "space", desc: "Stage / unstage selected file, or a whole folder recursively"},
+			{key: "a", desc: "Stage / unstage everything"},
 			{key: "enter", desc: "Expand/collapse folder, or show the selected file's diff"},
 			{key: "c", desc: "Commit staged changes"},
 			{key: "e", desc: "Edit file in $VISUAL/$EDITOR"},

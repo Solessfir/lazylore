@@ -103,6 +103,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "a":
+		// Stage/unstage everything, matching lazygit's own "a"
+		// (toggleStagedAll): same stage-if-anything's-unstaged-else-unstage
+		// rule as space on a directory, just always applied to the whole
+		// tree regardless of the current selection.
+		if m.focus == focusFiles {
+			return m, m.toggleDirStage("")
+		}
+		return m, nil
+
 	case "c":
 		m.prompt = promptCommit
 		m.input = textinput.New()
