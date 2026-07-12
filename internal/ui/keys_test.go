@@ -370,23 +370,106 @@ func TestModel_LKeyOnUnlockedFileAcquiresLock(t *testing.T) {
 	}
 }
 
-func TestModel_LKeyOnLockedFileReleasesLock(t *testing.T) {
+func TestModel_LKeyOnOwnLockedFileReleasesLockImmediately(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json lock release a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
+	m.currentUserID = "me"
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(locksMsg{locks: []lore.Lock{{Path: "a.txt", Owner: "me"}}})
+	m3 := updated.(Model)
+
+	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	m4 := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd for L on your own locked file")
+	}
+	if m4.prompt != promptNone {
+		t.Fatalf("prompt = %v, want promptNone - unlocking your own lock needs no confirm", m4.prompt)
+	}
+	runBatch(cmd)
+	if len(fake.Calls) != 1 || fake.Calls[0][1] != "lock" || fake.Calls[0][2] != "release" {
+		t.Fatalf("Calls = %+v, want a single lock release call", fake.Calls)
+	}
+}
+
+func TestModel_LKeyOnOtherOwnersLockedFileOpensForceUnlockConfirm(t *testing.T) {
+	// Matches lazygit's own confirm-before-destructive-action pattern
+	// (discard/reset/revert) - unlocking someone else's lock shouldn't fire
+	// on a bare keypress, since it either no-ops against stock lore or
+	// actually releases another person's lock against a lore fork with the
+	// AdminUnlock capability.
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "test-repo", "/repo")
+	m.currentUserID = "me"
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
 	updated, _ = m2.Update(locksMsg{locks: []lore.Lock{{Path: "a.txt", Owner: "someone"}}})
 	m3 := updated.(Model)
 
-	_, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	m4 := updated.(Model)
+	if cmd != nil {
+		t.Fatalf("expected no Cmd yet (confirmation pending), got %v", cmd)
+	}
+	if m4.prompt != promptConfirmForceUnlock || m4.pendingForceUnlockPath != "a.txt" {
+		t.Fatalf("prompt = %v, pendingForceUnlockPath = %q, want promptConfirmForceUnlock for a.txt", m4.prompt, m4.pendingForceUnlockPath)
+	}
+	if len(fake.Calls) != 0 {
+		t.Fatalf("expected no runner calls before confirming, got %+v", fake.Calls)
+	}
+}
+
+func TestModel_ConfirmingForceUnlockCallsLockReleaseWithForce(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json lock release --force a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	m.currentUserID = "me"
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(locksMsg{locks: []lore.Lock{{Path: "a.txt", Owner: "someone"}}})
+	m3 := updated.(Model)
+	updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	m4 := updated.(Model)
+
+	updated, cmd := m4.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m5 := updated.(Model)
+	if m5.prompt != promptNone {
+		t.Fatalf("prompt after confirming = %v, want promptNone", m5.prompt)
+	}
 	if cmd == nil {
-		t.Fatal("expected a non-nil Cmd for L on a locked file")
+		t.Fatal("expected a non-nil Cmd after confirming force-unlock")
 	}
 	runBatch(cmd)
-	if len(fake.Calls) != 1 || fake.Calls[0][1] != "lock" || fake.Calls[0][2] != "release" {
-		t.Fatalf("Calls = %+v, want a single lock release call", fake.Calls)
+	if len(fake.Calls) != 1 || fake.Calls[0][1] != "lock" || fake.Calls[0][2] != "release" || fake.Calls[0][3] != "--force" {
+		t.Fatalf("Calls = %+v, want a single lock release --force call", fake.Calls)
+	}
+}
+
+func TestModel_CancellingForceUnlockMakesNoRunnerCalls(t *testing.T) {
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "test-repo", "/repo")
+	m.currentUserID = "me"
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+	updated, _ = m2.Update(locksMsg{locks: []lore.Lock{{Path: "a.txt", Owner: "someone"}}})
+	m3 := updated.(Model)
+	updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	m4 := updated.(Model)
+
+	updated, cmd := m4.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m5 := updated.(Model)
+	if m5.prompt != promptNone || m5.pendingForceUnlockPath != "" {
+		t.Fatalf("after esc: prompt = %v, pendingForceUnlockPath = %q, want cleared", m5.prompt, m5.pendingForceUnlockPath)
+	}
+	if cmd != nil {
+		t.Fatalf("expected no Cmd after cancelling, got %v", cmd)
+	}
+	if len(fake.Calls) != 0 {
+		t.Fatalf("expected no runner calls after cancelling, got %+v", fake.Calls)
 	}
 }
 

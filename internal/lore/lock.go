@@ -59,3 +59,13 @@ func LockAcquire(r Runner, path string) (Result, error) {
 func LockRelease(r Runner, path string) (Result, error) {
 	return runChecked(r, "lock", "release", path)
 }
+
+// LockReleaseForce releases path's lock regardless of who holds it,
+// bypassing the usual ownership check. Requires a lore build with the
+// AdminUnlock capability (see lazylore's memory/project notes on the
+// lock-owner TODO); against a stock lore build this just fails the same
+// way a plain LockRelease on someone else's lock always has, surfaced
+// through the normal error path rather than anything special-cased here.
+func LockReleaseForce(r Runner, path string) (Result, error) {
+	return runChecked(r, "lock", "release", "--force", path)
+}

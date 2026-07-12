@@ -48,6 +48,9 @@ func (m Model) renderPromptModal() string {
 		return renderModal("Reset Branch", m.pendingResetLabel+"?", "y - confirm   n / esc - cancel")
 	case promptConfirmRevert:
 		return renderModal("Drop Revision", m.pendingResetLabel+"?", "y - confirm   n / esc - cancel")
+	case promptConfirmForceUnlock:
+		owner := m.locks[m.pendingForceUnlockPath].Owner
+		return renderModal("Force Unlock", "Force-unlock "+owner+"'s lock on "+m.pendingForceUnlockPath+"?", "y - confirm   n / esc - cancel")
 	default:
 		return ""
 	}

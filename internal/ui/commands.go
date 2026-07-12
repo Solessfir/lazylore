@@ -157,6 +157,24 @@ func lockToggleCmd(r lore.Runner, path string, locked bool) tea.Cmd {
 	}
 }
 
+// lockForceReleaseCmd is lockToggleCmd's unlock branch, but for someone
+// else's lock via LockReleaseForce - only reachable after the
+// promptConfirmForceUnlock confirm (see keys.go), and only actually
+// succeeds against a lore build with the AdminUnlock capability; against
+// stock lore it fails the same way a plain release on someone else's lock
+// always has, surfaced through the normal actionDoneMsg error path.
+func lockForceReleaseCmd(r lore.Runner, path string) tea.Cmd {
+	return func() tea.Msg {
+		rr := &runRecorder{inner: r}
+		opKey := "lock:" + path
+		_, err := lore.LockReleaseForce(rr, path)
+		return actionDoneMsg{label: "Force-unlock file", err: err, opKey: opKey, commands: rr.commands,
+			revert:  func(m *Model) { m.setFileLockedByPath(path, true) },
+			confirm: func(m *Model) { delete(m.locks, path) },
+		}
+	}
+}
+
 func stageCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}

@@ -53,16 +53,17 @@ type Model struct {
 	// (diff/log/patch) is currently loaded.
 	mainContentSource focusPanel
 
-	focus                focusPanel
-	prompt               promptKind
-	input                textinput.Model
-	pendingDiscardPath   string
-	pendingResetRevision string         // revision `g` (branch reset) will target once confirmed
-	pendingResetLabel    string         // human phrase for the confirm popup + command log, e.g. "Reset current branch to main"
-	pendingRevertMessage string         // auto-commit message `d` (Drop/revert) will pass to lore, e.g. `Revert "oops"`
-	selectMode           bool           // mouse capture dropped so the terminal can select text (mirrors lazyp4)
-	showHelp             bool           // "?" keybindings popup (see modal.go), mirrors lazyp4's own help overlay
-	helpViewport         viewport.Model // scrolls the keybindings popup's body (j/k/arrows/mouse wheel via its own default keymap)
+	focus                  focusPanel
+	prompt                 promptKind
+	input                  textinput.Model
+	pendingDiscardPath     string
+	pendingResetRevision   string         // revision `g` (branch reset) will target once confirmed
+	pendingResetLabel      string         // human phrase for the confirm popup + command log, e.g. "Reset current branch to main"
+	pendingRevertMessage   string         // auto-commit message `d` (Drop/revert) will pass to lore, e.g. `Revert "oops"`
+	pendingForceUnlockPath string         // path `L` (unlock) will force-release once confirmed, when it's someone else's lock
+	selectMode             bool           // mouse capture dropped so the terminal can select text (mirrors lazyp4)
+	showHelp               bool           // "?" keybindings popup (see modal.go), mirrors lazyp4's own help overlay
+	helpViewport           viewport.Model // scrolls the keybindings popup's body (j/k/arrows/mouse wheel via its own default keymap)
 
 	// pendingFileOps guards optimistic-UI re-entrancy: "stage:"+path or
 	// "lock:"+path while that path's background lore command is still in

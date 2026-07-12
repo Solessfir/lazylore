@@ -28,6 +28,7 @@ const (
 	promptConfirmDiscardAll
 	promptConfirmBranchReset
 	promptConfirmRevert
+	promptConfirmForceUnlock
 )
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -240,12 +241,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.focus == focusFiles {
 			if item, ok := m.files.SelectedItem().(fileItem); ok && !item.isDir {
 				path := item.change.Path
+				wasLocked := item.locked
+				// Unlocking someone else's lock needs a confirm - it either
+				// no-ops against a stock lore build (see LockReleaseForce)
+				// or actually releases another person's lock against a
+				// fork with the AdminUnlock capability, so it shouldn't
+				// fire on a bare keypress the way toggling your own
+				// lock/unlock does.
+				if wasLocked && !item.lockedByMe {
+					m.prompt = promptConfirmForceUnlock
+					m.pendingForceUnlockPath = path
+					return m, nil
+				}
 				opKey := "lock:" + path
 				if m.pendingFileOps[opKey] {
 					// Previous lock toggle on this path hasn't resolved yet.
 					return m, nil
 				}
-				wasLocked := item.locked
 				optimisticCmd := (&m).setFileLockedByPath(path, !wasLocked)
 				(&m).setPendingFileOp(opKey, true)
 				return m, tea.Batch(
@@ -348,6 +360,26 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(
 				func() tea.Msg { return setAppStatusMsg("Reverting...") },
 				revertCmd(m.runner, revision, message, label),
+			)
+		}
+		return m, nil
+	}
+
+	if m.prompt == promptConfirmForceUnlock {
+		m.prompt = promptNone
+		path := m.pendingForceUnlockPath
+		m.pendingForceUnlockPath = ""
+		if msg.String() == "y" {
+			opKey := "lock:" + path
+			if m.pendingFileOps[opKey] {
+				return m, nil
+			}
+			optimisticCmd := (&m).setFileLockedByPath(path, false)
+			(&m).setPendingFileOp(opKey, true)
+			return m, tea.Batch(
+				optimisticCmd,
+				func() tea.Msg { return setAppStatusMsg("Force-unlocking...") },
+				lockForceReleaseCmd(m.runner, path),
 			)
 		}
 		return m, nil
