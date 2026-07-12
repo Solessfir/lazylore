@@ -47,7 +47,7 @@ func bracketedKey(k string) string {
 func keybindBarFor(focus focusPanel) string {
 	switch focus {
 	case focusFiles:
-		return "Stage: " + bracketedKey("space") + " | Commit: c | Edit: e | Diff: " + bracketedKey("enter") + " | Discard: d | Reset: D | Lock: L"
+		return "Stage: " + bracketedKey("space") + " | Commit: c | Edit: e | Discard: d | Reset: D | Lock: L"
 	case focusBranches:
 		return "Checkout: " + bracketedKey("space") + " | New branch: n | Reset: g"
 	case focusHistory:

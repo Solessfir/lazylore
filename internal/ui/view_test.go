@@ -120,10 +120,11 @@ func TestKeybindBarFor_FilesMatchesLazygitsDisplayOnScreenSet(t *testing.T) {
 	// Ground truth: pkg/gui/controllers/files_controller.go's DisplayOnScreen:
 	// true bindings, in registration order (Select/space, CommitChanges/c,
 	// Edit/e, Remove/d, ViewResetOptions/D) - Stash dropped since lore has
-	// none, Diff/enter is lazylore's own file-diff-load action, Lock/L is
-	// lore-native (git/lazygit have no locking concept).
+	// none, Lock/L is lore-native (git/lazygit have no locking concept).
+	// Enter (diff/collapse) is intentionally left off the bar, same as
+	// lazygit's own Enter binding for files.
 	got := keybindBarFor(focusFiles)
-	want := "Stage: <space> | Commit: c | Edit: e | Diff: <enter> | Discard: d | Reset: D | Lock: L"
+	want := "Stage: <space> | Commit: c | Edit: e | Discard: d | Reset: D | Lock: L"
 	if got != want {
 		t.Fatalf("keybindBarFor(focusFiles) = %q, want %q", got, want)
 	}
