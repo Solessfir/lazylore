@@ -230,6 +230,45 @@ func TestLockToggleCmd_AcquireRevertsLockedFlagOnFailure(t *testing.T) {
 	}
 }
 
+func TestLockToggleCmd_AcquireConfirmUsesCurrentUserIDAsOwner(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json lock acquire hello.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	msg := lockToggleCmd(fake, "hello.txt", false)()
+	am := msg.(actionDoneMsg)
+	if am.confirm == nil {
+		t.Fatal("expected a non-nil confirm func on success")
+	}
+
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.currentUserID = "user-123"
+	am.confirm(&m)
+	if got := m.locks["hello.txt"].Owner; got != "user-123" {
+		t.Fatalf("locks[hello.txt].Owner = %q, want %q", got, "user-123")
+	}
+}
+
+func TestLockToggleCmd_AcquireConfirmFallsBackToUnknownOwnerWhenUnauthenticated(t *testing.T) {
+	// Regression: with no resolvable identity (lore auth info failing, e.g.
+	// no auth endpoint configured - see project_lazylore_lock_owner_todo
+	// memory), currentUserID is "" - the optimistic lock record used to
+	// store that empty string as Owner directly, showing "Locked by " with
+	// nothing after it in the diff view instead of the real server
+	// placeholder a subsequent lock status refresh would report.
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json lock acquire hello.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	msg := lockToggleCmd(fake, "hello.txt", false)()
+	am := msg.(actionDoneMsg)
+
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	// m.currentUserID left at its zero value ("").
+	am.confirm(&m)
+	if got := m.locks["hello.txt"].Owner; got != "<unknown>" {
+		t.Fatalf("locks[hello.txt].Owner = %q, want %q", got, "<unknown>")
+	}
+}
+
 func TestDiscardAllCmd_CallsRunnerForEveryPath(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json unstage a.txt b.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},

@@ -141,7 +141,17 @@ func lockToggleCmd(r lore.Runner, path string, locked bool) tea.Cmd {
 				if m.locks == nil {
 					m.locks = map[string]lore.Lock{}
 				}
-				m.locks[path] = lore.Lock{Path: path, Owner: m.currentUserID}
+				// m.currentUserID is "" whenever lore auth info can't resolve an
+				// identity (see project_lazylore_lock_owner_todo memory) - the
+				// real lock status the next refresh fetches will report the
+				// server's own "<unknown>" placeholder for that case, so use
+				// the same placeholder here rather than a blank owner ("Locked
+				// by " with nothing after it).
+				owner := m.currentUserID
+				if owner == "" {
+					owner = "<unknown>"
+				}
+				m.locks[path] = lore.Lock{Path: path, Owner: owner}
 			},
 		}
 	}
