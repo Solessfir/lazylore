@@ -31,6 +31,12 @@ type Model struct {
 
 	appStatus string
 	spinner   int
+	// statusGen is bumped every time appStatus is set or cleared. A delayed
+	// reveal (see statusRevealDelay) captures the generation it was
+	// scheduled under; if that no longer matches by the time the delay
+	// elapses, the action finished before it was ever worth showing a
+	// spinner for, and the reveal is dropped.
+	statusGen int
 
 	filesTotal    int
 	branchesTotal int
@@ -392,6 +398,15 @@ func (m *Model) openHelp() {
 	m.helpViewport.SetContent(content)
 }
 
+// clearAppStatus hides the spinner/status line and bumps statusGen so any
+// delayed reveal still in flight for the action that just finished (see
+// statusRevealDelay) gets dropped instead of flashing on screen after the
+// fact.
+func (m *Model) clearAppStatus() {
+	m.appStatus = ""
+	m.statusGen++
+}
+
 // setPendingFileOp marks (or clears) a "stage:"/"lock:" + path key as
 // having a background command in flight, guarding optimistic-UI
 // re-entrancy (see pendingFileOps).
@@ -492,6 +507,15 @@ func refreshCmd(r lore.Runner) tea.Cmd {
 		loadHistoryCmd(r),
 	)
 }
+
+// statusRevealDelay is how long an action must still be running before its
+// "Staging..."/"Refreshing..."/etc spinner actually appears (see
+// setAppStatusMsg/revealStatusMsg in Update). Long enough that fast, local
+// lore calls - especially now that stage/unstage/lock already show instant
+// optimistic feedback - never show it at all; short enough that a genuinely
+// slow action (a big sync, a slow remote) still gets a "please wait" cue
+// promptly.
+const statusRevealDelay = 200 * time.Millisecond
 
 // footerHeight is the number of terminal rows reserved for the prompt /
 // error line (directly above the global keybinding bar). The command log
@@ -745,13 +769,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case setAppStatusMsg:
-		m.appStatus = string(msg)
-		if m.appStatus != "" {
-			return m, tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
-				return tickMsg{}
-			})
+		text := string(msg)
+		if text == "" {
+			(&m).clearAppStatus()
+			return m, nil
 		}
-		return m, nil
+		// Don't show the spinner immediately - most actions (stage/unstage,
+		// lock toggle, the refresh that follows any of them, ...) finish
+		// well under statusRevealDelay, especially now that stage/unstage/
+		// lock already give instant optimistic feedback of their own (see
+		// setFileStagedByPath/setFileLockedByPath). Showing "Staging..."
+		// for one frame and yanking it away read as a flicker, not
+		// information. Only an action that's genuinely still running once
+		// the delay elapses gets a spinner at all.
+		m.statusGen++
+		gen := m.statusGen
+		return m, tea.Tick(statusRevealDelay, func(time.Time) tea.Msg {
+			return revealStatusMsg{gen: gen, text: text}
+		})
+
+	case revealStatusMsg:
+		if msg.gen != m.statusGen {
+			// The action this was scheduled for already finished (or was
+			// superseded by a newer one) before the delay elapsed.
+			return m, nil
+		}
+		m.appStatus = msg.text
+		return m, tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
+			return tickMsg{}
+		})
 
 	case tea.MouseMsg:
 		if m.showHelp {
@@ -789,7 +835,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case statusMsg:
-		m.appStatus = ""
+		(&m).clearAppStatus()
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -809,7 +855,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(setCmd, diffCmd, lockCmd, historyCmd)
 
 	case branchesMsg:
-		m.appStatus = ""
+		(&m).clearAppStatus()
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -832,7 +878,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, (&m).ensureMainContent())
 
 	case historyMsg:
-		m.appStatus = ""
+		(&m).clearAppStatus()
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -865,7 +911,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, (&m).rebuildFileItems()
 
 	case diffMsg:
-		m.appStatus = ""
+		(&m).clearAppStatus()
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -879,7 +925,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case actionDoneMsg:
-		m.appStatus = ""
+		(&m).clearAppStatus()
 		if msg.opKey != "" {
 			(&m).setPendingFileOp(msg.opKey, false)
 		}

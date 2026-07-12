@@ -67,3 +67,12 @@ type editorDoneMsg struct {
 type tickMsg time.Time
 
 type setAppStatusMsg string
+
+// revealStatusMsg is setAppStatusMsg's delayed reveal (see
+// statusRevealDelay in model.go) - it only actually shows the spinner if
+// gen still matches Model.statusGen when it fires, i.e. the action it was
+// scheduled for hasn't finished yet.
+type revealStatusMsg struct {
+	gen  int
+	text string
+}

@@ -11,6 +11,57 @@ import (
 	"lazylore/internal/lore"
 )
 
+func TestModel_SetAppStatusMsgDoesNotShowSpinnerImmediately(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, cmd := m.Update(setAppStatusMsg("Staging..."))
+	m2 := updated.(Model)
+	if m2.appStatus != "" {
+		t.Fatalf("appStatus = %q, want empty until the reveal delay elapses", m2.appStatus)
+	}
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd (the delayed reveal)")
+	}
+}
+
+func TestModel_RevealStatusMsgShowsSpinnerWhenStillCurrent(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(setAppStatusMsg("Staging..."))
+	m2 := updated.(Model)
+
+	updated, cmd := m2.Update(revealStatusMsg{gen: m2.statusGen, text: "Staging..."})
+	m3 := updated.(Model)
+	if m3.appStatus != "Staging..." {
+		t.Fatalf("appStatus = %q, want %q", m3.appStatus, "Staging...")
+	}
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd to kick off the spinner tick loop")
+	}
+}
+
+func TestModel_RevealStatusMsgSkippedWhenActionAlreadyFinished(t *testing.T) {
+	// Regression: the whole point of the delay is that a fast action (e.g.
+	// stage/unstage) completes and clears appStatus before the reveal timer
+	// fires - the stale reveal must not un-clear it and flash the spinner
+	// after the fact.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(setAppStatusMsg("Staging..."))
+	m2 := updated.(Model)
+	staleGen := m2.statusGen
+
+	// Action finishes before the reveal fires.
+	updated, _ = m2.Update(statusMsg{status: lore.Status{Branch: "main"}})
+	m3 := updated.(Model)
+
+	updated, cmd := m3.Update(revealStatusMsg{gen: staleGen, text: "Staging..."})
+	m4 := updated.(Model)
+	if m4.appStatus != "" {
+		t.Fatalf("appStatus = %q, want empty - the reveal was for an action that already finished", m4.appStatus)
+	}
+	if cmd != nil {
+		t.Fatal("expected a nil Cmd for a stale reveal (no spinner tick loop to start)")
+	}
+}
+
 func TestModel_HistoryRecolorsWhenStatusArrivesAfterHistory(t *testing.T) {
 	// Regression: statusMsg and historyMsg load independently (Init()
 	// batches both) with no ordering guarantee. Unpushed coloring depends
