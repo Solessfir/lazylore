@@ -68,6 +68,7 @@ type Model struct {
 	revisions     []lore.Revision      // last-loaded History list; kept so statusMsg (which can arrive before or after historyMsg) can recompute unpushed coloring on its own
 	collapsedDirs map[string]bool      // Files-panel tree: which directory paths are closed
 	locks         map[string]lore.Lock // path -> lock, for files currently shown in the Files panel
+	currentUserID string               // this session's identity (lore.CurrentUserID), for locked-by-me coloring; "" until loaded or if unauthenticated
 	err           error
 
 	width, height int
@@ -368,12 +369,7 @@ func (m *Model) toggleDirCollapse(path string) tea.Cmd {
 		m.collapsedDirs = map[string]bool{}
 	}
 	m.collapsedDirs[path] = !m.collapsedDirs[path]
-	items := statusToItems(m.status, m.collapsedDirs, m.locks)
-	cmd := m.files.SetItems(items)
-	m.filesTotal = len(items)
-	m.files.SetShowStatusBar(false)
-	m.files.SetShowPagination(false)
-	return cmd
+	return m.rebuildFileItems()
 }
 
 // openHelp builds the "?" keybindings popup's content for the currently
@@ -483,6 +479,7 @@ func (m Model) Init() tea.Cmd {
 		loadStatusCmd(m.runner),
 		loadBranchesCmd(m.runner),
 		loadHistoryCmd(m.runner),
+		loadCurrentUserCmd(m.runner),
 		tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg { return tickMsg{} }),
 	)
 }
@@ -596,6 +593,21 @@ func (m *Model) recomputePanelHeights() {
 // status. Called from both statusMsg and historyMsg handlers since either
 // can determine a row's color and they load independently - whichever
 // arrives second must still leave the list correct.
+// rebuildFileItems recomputes the Files list's items (including lock/
+// lockedByMe badges) from the model's last-known status/locks/currentUserID.
+// Called from every handler that can independently learn one of those three
+// (statusMsg, locksMsg, currentUserMsg, toggleDirCollapse) since they load
+// independently and can arrive in any order - whichever lands last must
+// still leave the list correct, same reasoning as rebuildHistoryItems below.
+func (m *Model) rebuildFileItems() tea.Cmd {
+	items := statusToItems(m.status, m.collapsedDirs, m.locks, m.currentUserID)
+	cmd := m.files.SetItems(items)
+	m.filesTotal = len(items)
+	m.files.SetShowStatusBar(false)
+	m.files.SetShowPagination(false)
+	return cmd
+}
+
 func (m *Model) rebuildHistoryItems() tea.Cmd {
 	items := historyToItems(m.revisions, m.status.RemoteRevisionNumber, m.status.HasRemoteInfo)
 	cmd := m.history.SetItems(items)
@@ -673,7 +685,8 @@ func (m *Model) ensureMainContent() tea.Cmd {
 			return nil
 		}
 		m.currentDiffPath = item.change.Path
-		return loadDiffCmd(m.runner, item.change.Path)
+		lock, locked := m.locks[item.change.Path]
+		return loadDiffCmd(m.runner, item.change.Path, lock, locked)
 
 	case focusBranches:
 		item, ok := m.branches.SelectedItem().(branchItem)
@@ -783,11 +796,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Force a diff refresh for the current selection because the
 		// working tree (or staged state) may have changed.
 		m.currentDiffPath = ""
-		items := statusToItems(msg.status, m.collapsedDirs, m.locks)
-		setCmd := m.files.SetItems(items)
-		m.filesTotal = len(items)
-		m.files.SetShowStatusBar(false)
-		m.files.SetShowPagination(false)
+		setCmd := (&m).rebuildFileItems()
 		diffCmd := (&m).ensureMainContent()
 		lockCmd := loadLocksCmd(m.runner, changedPaths(msg.status))
 		// statusMsg and historyMsg load independently and can arrive in
@@ -841,10 +850,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			locks[l.Path] = l
 		}
 		m.locks = locks
-		items := statusToItems(m.status, m.collapsedDirs, m.locks)
-		cmd := m.files.SetItems(items)
-		m.filesTotal = len(items)
-		return m, cmd
+		return m, (&m).rebuildFileItems()
+
+	case currentUserMsg:
+		// Best-effort, same as locks: not authenticated just means every
+		// lock shows as someone else's rather than "locked by me".
+		if msg.err != nil {
+			return m, nil
+		}
+		m.currentUserID = msg.id
+		return m, (&m).rebuildFileItems()
 
 	case diffMsg:
 		m.appStatus = ""

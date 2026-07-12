@@ -188,9 +188,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if item.isDir {
 					return m, m.toggleDirCollapse(item.path)
 				}
+				lock, locked := m.locks[item.change.Path]
 				return m, tea.Batch(
 					func() tea.Msg { return setAppStatusMsg("Loading diff...") },
-					loadDiffCmd(m.runner, item.change.Path),
+					loadDiffCmd(m.runner, item.change.Path, lock, locked),
 				)
 			}
 		}

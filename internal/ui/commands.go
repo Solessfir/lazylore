@@ -32,10 +32,40 @@ func loadHistoryCmd(r lore.Runner) tea.Cmd {
 	}
 }
 
-func loadDiffCmd(r lore.Runner, path string) tea.Cmd {
+// loadDiffCmd loads a file's diff for the Files panel's main content, then
+// enriches it (see enrichFileDiffText) with lock ownership and a real
+// filename on lore's otherwise-bare binary-diff marker. lock/locked come
+// from the caller's already-loaded m.locks - not re-fetched here.
+func loadDiffCmd(r lore.Runner, path string, lock lore.Lock, locked bool) tea.Cmd {
 	return func() tea.Msg {
 		text, err := lore.Diff(r, path)
-		return diffMsg{text: text, err: err}
+		if err != nil {
+			return diffMsg{err: err}
+		}
+		return diffMsg{text: enrichFileDiffText(text, path, lock, locked)}
+	}
+}
+
+// enrichFileDiffText prepends a lock line when the file is locked, and
+// renames lore's bare "Binary files differ" marker (lore-revision/src/file/
+// diff.rs's emit_binary_diff has no filename baked in, unlike git's own
+// binary-diff line) to name the file - for a locked binary file the diff
+// text is otherwise the only thing shown, so both are worth surfacing here.
+func enrichFileDiffText(text, path string, lock lore.Lock, locked bool) string {
+	const binaryMarker = "Binary files differ"
+	if strings.Contains(text, binaryMarker) {
+		text = strings.ReplaceAll(text, binaryMarker, "Binary file "+path+" differs")
+	}
+	if locked {
+		text = "Locked by " + lock.Owner + "\n\n" + text
+	}
+	return text
+}
+
+func loadCurrentUserCmd(r lore.Runner) tea.Cmd {
+	return func() tea.Msg {
+		id, err := lore.CurrentUserID(r)
+		return currentUserMsg{id: id, err: err}
 	}
 }
 

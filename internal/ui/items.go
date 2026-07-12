@@ -24,11 +24,23 @@ var (
 	fileUnstagedColor = lipgloss.Color("1") // red
 )
 
-// lockBadge marks a file with an active lore file lock (any owner - see
-// internal/lore/lock.go; git/lazygit have no equivalent concept).
-const lockBadge = "\U0001F512" // 🔒
+// lockBadge marks a file with an active lore file lock (see
+// internal/lore/lock.go; git/lazygit have no equivalent concept). Plain
+// ASCII rather than an emoji glyph - emoji column-width handling is
+// inconsistent across terminals, which made the badge visually misaligned.
+const lockBadge = "[L]"
 
-var lockBadgeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
+// lockBadgeStyle colors the badge by ownership: a lock you hold yourself is
+// informational (not a warning - purple, distinct from every other status
+// color already in use: white unstaged, green staged, blue/cyan selection),
+// while a lock held by someone else keeps the yellow warning color, since
+// that's the case that actually blocks you.
+func lockBadgeStyle(lockedByMe bool) lipgloss.Style {
+	if lockedByMe {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
+}
 
 func fileStatusColor(staged bool) lipgloss.Color {
 	if staged {
@@ -50,13 +62,14 @@ func fileNameStyle(staged bool) lipgloss.Style {
 // refresh by statusToItems, with collapse state carried separately on
 // Model so it survives a refresh.
 type fileItem struct {
-	path      string
-	isDir     bool
-	depth     int
-	change    lore.FileChange
-	staged    bool
-	collapsed bool // only meaningful when isDir
-	locked    bool // only meaningful for files; lore lock held by anyone
+	path       string
+	isDir      bool
+	depth      int
+	change     lore.FileChange
+	staged     bool
+	collapsed  bool // only meaningful when isDir
+	locked     bool // only meaningful for files; lore lock held by anyone
+	lockedByMe bool // only meaningful when locked is true
 }
 
 func (i fileItem) FilterValue() string { return i.path }
@@ -118,7 +131,7 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		nameStyle := fileNameStyle(fi.staged)
 		line := indent + statusStyle.Render(string(fi.change.Status)) + " " + nameStyle.Render(fi.baseName())
 		if fi.locked {
-			line += " " + lockBadgeStyle.Render(lockBadge)
+			line += " " + lockBadgeStyle(fi.lockedByMe).Render(lockBadge)
 		}
 		fmt.Fprint(w, line)
 		return
@@ -160,7 +173,7 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		selSpace.Render(" ") +
 		nameStyle.Render(fi.baseName())
 	if fi.locked {
-		colored += selSpace.Render(" ") + lockBadgeStyle.Background(selectedBg).Render(lockBadge)
+		colored += selSpace.Render(" ") + lockBadgeStyle(fi.lockedByMe).Background(selectedBg).Render(lockBadge)
 	}
 
 	// selectedRowStyle ensures full-width background fill (including gutter area)
@@ -170,21 +183,26 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 // statusToItems flattens a Status's changed files into a directory tree
 // (see filetree.go), respecting which directories are currently collapsed.
 // locks maps path -> held lock (see loadLocksCmd); nil is fine (no badges).
-func statusToItems(s lore.Status, collapsedDirs map[string]bool, locks map[string]lore.Lock) []list.Item {
+// currentUserID (see lore.CurrentUserID) decides lockedByMe; "" (not yet
+// loaded, or unauthenticated) just means every lock shows as someone
+// else's rather than guessing.
+func statusToItems(s lore.Status, collapsedDirs map[string]bool, locks map[string]lore.Lock, currentUserID string) []list.Item {
 	tree := buildFileTree(s)
 	rows := flattenFileTree(tree, collapsedDirs)
 
 	items := make([]list.Item, 0, len(rows))
 	for _, row := range rows {
-		_, locked := locks[row.node.path]
+		lock, locked := locks[row.node.path]
+		lockedByMe := locked && currentUserID != "" && lock.Owner == currentUserID
 		items = append(items, fileItem{
-			path:      row.node.path,
-			isDir:     row.node.isDir,
-			depth:     row.depth,
-			change:    row.node.change,
-			staged:    row.node.staged,
-			collapsed: collapsedDirs[row.node.path],
-			locked:    locked,
+			path:       row.node.path,
+			isDir:      row.node.isDir,
+			depth:      row.depth,
+			change:     row.node.change,
+			staged:     row.node.staged,
+			collapsed:  collapsedDirs[row.node.path],
+			locked:     locked,
+			lockedByMe: lockedByMe,
 		})
 	}
 	return items

@@ -72,13 +72,41 @@ func TestLoadDiffCmd_ReturnsDiffMsg(t *testing.T) {
 {"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `},
 	}}
-	msg := loadDiffCmd(fake, "hello.txt")()
+	msg := loadDiffCmd(fake, "hello.txt", lore.Lock{}, false)()
 	dm, ok := msg.(diffMsg)
 	if !ok {
 		t.Fatalf("msg = %#v, want diffMsg", msg)
 	}
 	if dm.text != "+++ hello.txt\n" {
 		t.Fatalf("text = %q", dm.text)
+	}
+}
+
+func TestLoadDiffCmd_PrependsLockLineWhenLocked(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json diff hello.txt": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"hello.txt","patch":"+++ hello.txt\n","action":"keep"}}
+` + jsonCompleteSuccess},
+	}}
+	msg := loadDiffCmd(fake, "hello.txt", lore.Lock{Path: "hello.txt", Owner: "user-123"}, true)()
+	dm := msg.(diffMsg)
+	want := "Locked by user-123\n\n+++ hello.txt\n"
+	if dm.text != want {
+		t.Fatalf("text = %q, want %q", dm.text, want)
+	}
+}
+
+func TestLoadDiffCmd_RenamesBareBinaryMarkerWithThePath(t *testing.T) {
+	// lore's own binary-diff marker has no filename baked in (unlike git's),
+	// see lore-revision/src/file/diff.rs's emit_binary_diff.
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json diff a.uasset": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"a.uasset","patch":"Binary files differ\n","action":"keep"}}
+` + jsonCompleteSuccess},
+	}}
+	msg := loadDiffCmd(fake, "a.uasset", lore.Lock{}, false)()
+	dm := msg.(diffMsg)
+	want := "Binary file a.uasset differs\n"
+	if dm.text != want {
+		t.Fatalf("text = %q, want %q", dm.text, want)
 	}
 }
 

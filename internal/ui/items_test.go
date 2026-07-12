@@ -75,7 +75,7 @@ func TestStatusToItems_StagedThenUnstaged(t *testing.T) {
 		Staged:   []lore.FileChange{{Status: 'A', Path: "a.txt"}},
 		Unstaged: []lore.FileChange{{Status: 'M', Path: "b.txt"}},
 	}
-	items := statusToItems(s, nil, nil)
+	items := statusToItems(s, nil, nil, "")
 	if len(items) != 2 {
 		t.Fatalf("items = %+v, want 2 entries", items)
 	}
@@ -92,7 +92,7 @@ func TestStatusToItems_StagedThenUnstaged(t *testing.T) {
 func TestStatusToItems_MarksLockedFiles(t *testing.T) {
 	s := lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}, {Status: 'M', Path: "b.txt"}}}
 	locks := map[string]lore.Lock{"a.txt": {Path: "a.txt", Owner: "someone"}}
-	items := statusToItems(s, nil, locks)
+	items := statusToItems(s, nil, locks, "")
 	a, ok := items[0].(fileItem)
 	if !ok || !a.locked {
 		t.Fatalf("items[0] = %+v, want a.txt marked locked", items[0])
@@ -100,6 +100,36 @@ func TestStatusToItems_MarksLockedFiles(t *testing.T) {
 	b, ok := items[1].(fileItem)
 	if !ok || b.locked {
 		t.Fatalf("items[1] = %+v, want b.txt not locked", items[1])
+	}
+}
+
+func TestStatusToItems_DistinguishesLockedByMeFromLockedByOther(t *testing.T) {
+	s := lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "mine.txt"}, {Status: 'M', Path: "theirs.txt"}}}
+	locks := map[string]lore.Lock{
+		"mine.txt":   {Path: "mine.txt", Owner: "user-123"},
+		"theirs.txt": {Path: "theirs.txt", Owner: "user-456"},
+	}
+	items := statusToItems(s, nil, locks, "user-123")
+	mine, ok := items[0].(fileItem)
+	if !ok || !mine.locked || !mine.lockedByMe {
+		t.Fatalf("items[0] = %+v, want mine.txt locked and lockedByMe", items[0])
+	}
+	theirs, ok := items[1].(fileItem)
+	if !ok || !theirs.locked || theirs.lockedByMe {
+		t.Fatalf("items[1] = %+v, want theirs.txt locked but not lockedByMe", items[1])
+	}
+}
+
+func TestStatusToItems_EmptyCurrentUserIDNeverMarksLockedByMe(t *testing.T) {
+	// Before loadCurrentUserCmd resolves (or when unauthenticated),
+	// currentUserID is "" - must never accidentally match a lock whose
+	// Owner also happens to be empty.
+	s := lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}
+	locks := map[string]lore.Lock{"a.txt": {Path: "a.txt", Owner: ""}}
+	items := statusToItems(s, nil, locks, "")
+	a, ok := items[0].(fileItem)
+	if !ok || !a.locked || a.lockedByMe {
+		t.Fatalf("items[0] = %+v, want locked but not lockedByMe when currentUserID is empty", items[0])
 	}
 }
 

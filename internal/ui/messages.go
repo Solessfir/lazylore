@@ -26,6 +26,11 @@ type locksMsg struct {
 	err   error
 }
 
+type currentUserMsg struct {
+	id  string
+	err error
+}
+
 // diffMsg carries text for the shared main content panel - a file diff
 // (Files panel), a branch log (Branches panel), or a revision patch
 // (History panel). raw skips diff coloring for content that isn't actually
