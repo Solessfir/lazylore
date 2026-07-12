@@ -45,10 +45,11 @@ type diffMsg struct {
 // reconciles the success case, but a failure never triggers one, so the
 // optimistic guess has to be walked back by hand.
 type actionDoneMsg struct {
-	label  string
-	err    error
-	opKey  string
-	revert func(*Model)
+	label    string
+	err      error
+	opKey    string
+	revert   func(*Model)
+	commands []string // actual lore command line(s) run, for the Command Log (see commandlog.go)
 }
 
 type editorDoneMsg struct {

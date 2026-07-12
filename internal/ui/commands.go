@@ -74,47 +74,71 @@ func loadLocksCmd(r lore.Runner, paths []string) tea.Cmd {
 	}
 }
 
+// runRecorder wraps a Runner and records the display form of every command
+// it runs (args minus the leading "--json", which is plumbing a user typing
+// the command themselves wouldn't include) - for the Command Log (see
+// commandlog.go), matching lazygit's own LogCommand next to each LogAction.
+type runRecorder struct {
+	inner    lore.Runner
+	commands []string
+}
+
+func (rr *runRecorder) Run(args ...string) (lore.Result, error) {
+	res, err := rr.inner.Run(args...)
+	display := args
+	if len(display) > 0 && display[0] == "--json" {
+		display = display[1:]
+	}
+	rr.commands = append(rr.commands, "lore "+strings.Join(display, " "))
+	return res, err
+}
+
 func lockToggleCmd(r lore.Runner, path string, locked bool) tea.Cmd {
 	return func() tea.Msg {
+		rr := &runRecorder{inner: r}
 		opKey := "lock:" + path
 		if locked {
-			_, err := lore.LockRelease(r, path)
-			return actionDoneMsg{label: "unlock " + path, err: err, opKey: opKey,
+			_, err := lore.LockRelease(rr, path)
+			return actionDoneMsg{label: "Unlock file", err: err, opKey: opKey, commands: rr.commands,
 				revert: func(m *Model) { m.setFileLockedByPath(path, true) }}
 		}
-		_, err := lore.LockAcquire(r, path)
-		return actionDoneMsg{label: "lock " + path, err: err, opKey: opKey,
+		_, err := lore.LockAcquire(rr, path)
+		return actionDoneMsg{label: "Lock file", err: err, opKey: opKey, commands: rr.commands,
 			revert: func(m *Model) { m.setFileLockedByPath(path, false) }}
 	}
 }
 
 func stageCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := lore.Stage(r, path)
-		return actionDoneMsg{label: "stage " + path, err: err, opKey: "stage:" + path,
+		rr := &runRecorder{inner: r}
+		_, err := lore.Stage(rr, path)
+		return actionDoneMsg{label: "Stage file", err: err, opKey: "stage:" + path, commands: rr.commands,
 			revert: func(m *Model) { m.setFileStagedByPath(path, true, false) }}
 	}
 }
 
 func unstageCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := lore.Unstage(r, path)
-		return actionDoneMsg{label: "unstage " + path, err: err, opKey: "stage:" + path,
+		rr := &runRecorder{inner: r}
+		_, err := lore.Unstage(rr, path)
+		return actionDoneMsg{label: "Unstage file", err: err, opKey: "stage:" + path, commands: rr.commands,
 			revert: func(m *Model) { m.setFileStagedByPath(path, false, true) }}
 	}
 }
 
 func resetCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := lore.DiscardChanges(r, path)
-		return actionDoneMsg{label: "reset " + path, err: err}
+		rr := &runRecorder{inner: r}
+		_, err := lore.DiscardChanges(rr, path)
+		return actionDoneMsg{label: "Discard changes", err: err, commands: rr.commands}
 	}
 }
 
 func discardAllCmd(r lore.Runner, paths []string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := lore.DiscardAllChanges(r, paths)
-		return actionDoneMsg{label: "discard all changes", err: err}
+		rr := &runRecorder{inner: r}
+		_, err := lore.DiscardAllChanges(rr, paths)
+		return actionDoneMsg{label: "Discard all changes", err: err, commands: rr.commands}
 	}
 }
 
@@ -147,42 +171,48 @@ func editFileCmd(absPath string) tea.Cmd {
 
 func commitCmd(r lore.Runner, message string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := lore.Commit(r, message)
-		return actionDoneMsg{label: "commit", err: err}
+		rr := &runRecorder{inner: r}
+		_, err := lore.Commit(rr, message)
+		return actionDoneMsg{label: "Commit", err: err, commands: rr.commands}
 	}
 }
 
 func switchBranchCmd(r lore.Runner, name string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := lore.SwitchBranch(r, name)
-		return actionDoneMsg{label: "switch " + name, err: err}
+		rr := &runRecorder{inner: r}
+		_, err := lore.SwitchBranch(rr, name)
+		return actionDoneMsg{label: "Checkout branch", err: err, commands: rr.commands}
 	}
 }
 
 func createBranchCmd(r lore.Runner, name string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := lore.CreateBranch(r, name)
-		return actionDoneMsg{label: "create branch " + name, err: err}
+		rr := &runRecorder{inner: r}
+		_, err := lore.CreateBranch(rr, name)
+		return actionDoneMsg{label: "Create branch", err: err, commands: rr.commands}
 	}
 }
 
 func resetBranchCmd(r lore.Runner, revision, label string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := lore.ResetBranchTo(r, revision)
-		return actionDoneMsg{label: label, err: err}
+		rr := &runRecorder{inner: r}
+		_, err := lore.ResetBranchTo(rr, revision)
+		return actionDoneMsg{label: label, err: err, commands: rr.commands}
 	}
 }
 
 func syncToCmd(r lore.Runner, revision, label string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := lore.SyncTo(r, revision)
-		return actionDoneMsg{label: label, err: err}
+		rr := &runRecorder{inner: r}
+		_, err := lore.SyncTo(rr, revision)
+		return actionDoneMsg{label: label, err: err, commands: rr.commands}
 	}
 }
 
 func revertCmd(r lore.Runner, revision, message, label string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := lore.RevertRevision(r, revision, message)
-		return actionDoneMsg{label: label, err: err}
+		rr := &runRecorder{inner: r}
+		_, err := lore.RevertRevision(rr, revision, message)
+		return actionDoneMsg{label: label, err: err, commands: rr.commands}
 	}
 }

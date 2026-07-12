@@ -1,9 +1,30 @@
 package ui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+// commandLogActionStyle matches lazygit's own command log title color
+// (pkg/gui/command_log_panel.go's LogAction: style.FgYellow) - the plain
+// command lines under it use the terminal's default text color there too,
+// so they get no style override here.
+var commandLogActionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+
+// commandLogEntry is one user-initiated action: a human title (rendered
+// gold, like lazygit's LogAction) plus the actual lore command line(s) it
+// ran underneath (rendered indented, like lazygit's LogCommand) - shown
+// without the leading "--json" flag since that's plumbing, not something a
+// user typing the command themselves would include.
+type commandLogEntry struct {
+	action   string
+	commands []string
+	err      error
+}
 
 type commandLogModel struct {
-	entries []string
+	entries []commandLogEntry
 	max     int
 }
 
@@ -11,27 +32,45 @@ func newCommandLogModel(max int) commandLogModel {
 	return commandLogModel{max: max}
 }
 
-func (m *commandLogModel) Append(entry string) {
-	m.entries = append(m.entries, entry)
+// AppendAction records one user-initiated action and the real command
+// line(s) it ran. err (if non-nil) is shown as an extra indented line so a
+// failure is still visible in the log, not just in the footer.
+func (m *commandLogModel) AppendAction(action string, commands []string, err error) {
+	m.entries = append(m.entries, commandLogEntry{action: action, commands: commands, err: err})
 	if len(m.entries) > m.max {
 		m.entries = m.entries[len(m.entries)-m.max:]
 	}
 }
 
 func (m commandLogModel) View() string {
-	return strings.Join(m.entries, "\n")
+	var lines []string
+	for i, e := range m.entries {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, commandLogActionStyle.Render(e.action))
+		for _, c := range e.commands {
+			lines = append(lines, "  "+c)
+		}
+		if e.err != nil {
+			lines = append(lines, errorStyle.Render("  "+e.err.Error()))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
-// LastLines returns the last n rendered log entries, joined by newlines.
-// It caps what's rendered without discarding older entries from m.entries
-// (retention is still governed by max in Append). n <= 0 yields "".
+// LastLines returns the last n rendered log lines (not entries - one entry
+// can span several lines), joined by newlines. It caps what's rendered
+// without discarding older entries (retention is governed by max in
+// AppendAction). n <= 0 yields "".
 func (m commandLogModel) LastLines(n int) string {
-	if n <= 0 || len(m.entries) == 0 {
+	full := m.View()
+	if n <= 0 || full == "" {
 		return ""
 	}
-	entries := m.entries
-	if len(entries) > n {
-		entries = entries[len(entries)-n:]
+	lines := strings.Split(full, "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
 	}
-	return strings.Join(entries, "\n")
+	return strings.Join(lines, "\n")
 }

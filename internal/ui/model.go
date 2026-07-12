@@ -822,11 +822,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.revert != nil {
 				msg.revert(&m)
 			}
-			m.log.Append(msg.label + ": FAILED: " + msg.err.Error())
+			m.log.AppendAction(msg.label, msg.commands, msg.err)
 			m.err = msg.err
 			return m, nil
 		}
-		m.log.Append(msg.label + ": OK")
+		m.log.AppendAction(msg.label, msg.commands, nil)
 		return m, refreshCmd(m.runner)
 
 	case editorDoneMsg:

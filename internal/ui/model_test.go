@@ -479,10 +479,10 @@ func TestModel_ActionDoneMsgAppendsToCommandLogAndRefreshes(t *testing.T) {
 		"--json history 50": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
-	updated, cmd := m.Update(actionDoneMsg{label: "stage a.txt"})
+	updated, cmd := m.Update(actionDoneMsg{label: "Stage file", commands: []string{"lore stage a.txt"}})
 	m2 := updated.(Model)
-	if len(m2.log.entries) != 1 || m2.log.entries[0] != "stage a.txt: OK" {
-		t.Fatalf("log.entries = %+v", m2.log.entries)
+	if want := "Stage file\n  lore stage a.txt"; m2.log.View() != want {
+		t.Fatalf("log.View() = %q, want %q", m2.log.View(), want)
 	}
 	if cmd == nil {
 		t.Fatal("expected a non-nil refresh Cmd after a successful action")

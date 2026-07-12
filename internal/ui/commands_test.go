@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"reflect"
 	"testing"
 
 	"lazylore/internal/lore"
@@ -95,6 +96,28 @@ func TestStageCmd_CallsRunnerAndReturnsActionDoneMsg(t *testing.T) {
 	}
 	if len(fake.Calls) != 1 {
 		t.Fatalf("Calls = %+v, want exactly one call", fake.Calls)
+	}
+	if am.label != "Stage file" {
+		t.Fatalf("label = %q, want %q", am.label, "Stage file")
+	}
+	if want := []string{"lore stage hello.txt"}; !reflect.DeepEqual(am.commands, want) {
+		t.Fatalf("commands = %+v, want %+v (no --json - that's plumbing, not something a user would type)", am.commands, want)
+	}
+}
+
+func TestDiscardAllCmd_CommandLogShowsBothRealCommands(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json unstage a.txt b.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge a.txt b.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	msg := discardAllCmd(fake, []string{"a.txt", "b.txt"})()
+	am, ok := msg.(actionDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %#v, want actionDoneMsg", msg)
+	}
+	want := []string{"lore unstage a.txt b.txt", "lore reset --purge a.txt b.txt"}
+	if !reflect.DeepEqual(am.commands, want) {
+		t.Fatalf("commands = %+v, want %+v", am.commands, want)
 	}
 }
 
