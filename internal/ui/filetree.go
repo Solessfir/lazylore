@@ -44,6 +44,12 @@ func buildFileTree(s lore.Status) *fileTreeNode {
 	displayRoot := &fileTreeNode{isDir: true} // the "/" row; path == "" marks it
 
 	insert := func(change lore.FileChange, staged bool) {
+		if change.Path == "" || strings.HasSuffix(change.Path, "/") {
+			// A trailing slash (or an outright empty path) has no filename
+			// segment to show - strings.Split would otherwise produce an
+			// empty last part and insert a blank-labeled leaf row.
+			return
+		}
 		parts := strings.Split(change.Path, "/")
 		current := displayRoot
 		for i, part := range parts {
