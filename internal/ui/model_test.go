@@ -132,6 +132,37 @@ func TestModel_MainPanelTitle_PersistsSourceWhenDiffPanelItselfFocused(t *testin
 	}
 }
 
+func TestModel_EnsureMainContent_SelectingDirectoryClearsDiff(t *testing.T) {
+	// Matches lazygit: selecting a directory clears the main panel instead
+	// of leaving the last-selected file's diff (including its "Locked by
+	// ..." line) stuck on screen.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})
+	m2 := updated.(Model)
+	m2.focus = focusFiles
+
+	m2.diff.SetContentRaw("Locked by Solessfir\n\nsome stale diff text")
+	m2.currentDiffPath = "src/a.go"
+
+	// The tree's only row for this status is the "src" directory itself
+	// (see filetree.go's compression).
+	item, ok := m2.files.SelectedItem().(fileItem)
+	if !ok || !item.isDir {
+		t.Fatalf("precondition failed: selected item = %+v, want the 'src' directory", item)
+	}
+
+	cmd := (&m2).ensureMainContent()
+	if cmd != nil {
+		t.Fatalf("expected no load Cmd for a directory selection, got %v", cmd)
+	}
+	if m2.currentDiffPath != "" {
+		t.Fatalf("currentDiffPath = %q, want cleared", m2.currentDiffPath)
+	}
+	if strings.Contains(m2.diff.vp.View(), "stale diff text") {
+		t.Fatal("expected the diff panel content to be cleared, but stale text is still showing")
+	}
+}
+
 func TestModel_EnsureMainContent_LoadsBranchLogOnce(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json history 50 --branch dev": {ExitCode: 0, Stdout: `{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}` + "\n"},

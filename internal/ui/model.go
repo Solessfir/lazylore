@@ -803,7 +803,20 @@ func (m *Model) ensureMainContent() tea.Cmd {
 	switch m.focus {
 	case focusFiles:
 		item, ok := m.files.SelectedItem().(fileItem)
-		if !ok || item.isDir || item.change.Path == m.currentDiffPath {
+		if !ok {
+			return nil
+		}
+		if item.isDir {
+			// Matches lazygit: selecting a directory clears the main panel
+			// instead of leaving the last-selected file's diff (and its
+			// "Locked by ..." line) stuck on screen.
+			if m.currentDiffPath != "" {
+				m.currentDiffPath = ""
+				m.diff.SetContentRaw("")
+			}
+			return nil
+		}
+		if item.change.Path == m.currentDiffPath {
 			return nil
 		}
 		m.currentDiffPath = item.change.Path
