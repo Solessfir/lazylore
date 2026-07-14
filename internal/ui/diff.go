@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -20,13 +21,23 @@ type diffModel struct {
 }
 
 func newDiffModel(width, height int) diffModel {
-	return diffModel{vp: viewport.New(width, height)}
+	vp := viewport.New(width, height)
+	// The diff pane never wraps or scrolls horizontally (lazygit clips
+	// instead) - a stray left/right arrow press while it's focused would
+	// otherwise scroll it via viewport's own default keymap, silently
+	// offsetting every line rendered afterward (see viewWithScrollbar's
+	// ansi.Cut(..., xOffset, ...) call inside bubbles itself) until a wide
+	// enough line exposed it as visibly cut-off/garbled text.
+	vp.KeyMap.Left = key.Binding{}
+	vp.KeyMap.Right = key.Binding{}
+	return diffModel{vp: vp}
 }
 
 func (m *diffModel) SetContent(text string) {
 	colored := colorizeDiff(text)
 	m.totalLines = len(strings.Split(colored, "\n"))
 	m.vp.SetContent(colored)
+	m.vp.SetXOffset(0)
 }
 
 // SetContentRaw sets already-styled content (e.g. a branch log) without
@@ -36,6 +47,7 @@ func (m *diffModel) SetContent(text string) {
 func (m *diffModel) SetContentRaw(text string) {
 	m.totalLines = len(strings.Split(text, "\n"))
 	m.vp.SetContent(text)
+	m.vp.SetXOffset(0)
 }
 
 // viewWithScrollbar returns the diff content with a simple right-side scrollbar
@@ -71,15 +83,16 @@ func (m diffModel) viewWithScrollbar() string {
 	thumbSize := max(1, h*h/m.totalLines)
 
 	innerW := m.vp.Width
+	// Pad-or-truncate every line to exactly innerW so the scrollbar lands
+	// flush against the right border. Must go through lipgloss (ANSI-aware)
+	// rather than slicing runes directly - colorizeDiff-styled lines carry
+	// ANSI escape codes, and a raw []rune slice cuts through the middle of
+	// those on any line longer than innerW, corrupting the terminal's color
+	// state for everything rendered afterward.
+	cellStyle := lipgloss.NewStyle().Width(innerW).MaxWidth(innerW)
 	var result []string
 	for i, line := range lines {
-		// pad line to full inner content width so scrollbar is right-aligned inside the panel
-		padded := line
-		if w := lipgloss.Width(line); w < innerW {
-			padded += strings.Repeat(" ", innerW-w)
-		} else if w > innerW {
-			padded = string([]rune(line)[:innerW])
-		}
+		padded := cellStyle.Render(line)
 
 		bar := "│" // track
 		if i >= thumbStart && i < thumbStart+thumbSize {

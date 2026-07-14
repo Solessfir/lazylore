@@ -1,6 +1,11 @@
 package ui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 func TestColorizeDiff_PreservesLineContent(t *testing.T) {
 	input := "hello.txt\n--- hello.txt@1\n+++ hello.txt\n@@ -1 +1,2 @@\n Hello, Lore\n+Second line added\n"
@@ -25,9 +30,47 @@ func indexOf(haystack, needle string) int {
 	return -1
 }
 
+func TestDiffModel_LeftRightKeysDoNotHorizontallyScroll(t *testing.T) {
+	// The diff pane never wraps or scrolls horizontally (lazygit clips
+	// instead) - left/right must be inert here so lazylore's own h/l
+	// panel-switch shortcuts (and stray arrow presses) can never leave a
+	// nonzero scroll offset that silently clips the next file's diff.
+	m := newDiffModel(80, 24)
+	if m.vp.KeyMap.Left.Enabled() || m.vp.KeyMap.Right.Enabled() {
+		t.Fatal("expected viewport's Left/Right keybindings to be disabled")
+	}
+}
+
 func TestNewDiffModel_SetContentDoesNotPanic(t *testing.T) {
 	m := newDiffModel(80, 24)
 	m.SetContent("some diff text\n")
+}
+
+func TestDiffModel_ViewWithScrollbarPadsColoredLongLinesToExactWidth(t *testing.T) {
+	// Regression: viewWithScrollbar used to truncate long lines by raw rune
+	// count ([]rune(line)[:innerW]), slicing through the middle of an ANSI
+	// escape code on any colorizeDiff-styled line longer than the panel
+	// width - corrupting the terminal's color state for every row rendered
+	// after it. Reported as the whole layout's borders shifting/garbling
+	// when selecting a file with a long diff.
+	m := newDiffModel(20, 5)
+	m.vp.Width = 20
+	// More lines than the viewport height, so viewWithScrollbar actually
+	// takes the scrollbar-drawing path (its early return for
+	// totalLines <= h skips the pad/truncate loop entirely).
+	var lines []string
+	for i := 0; i < 10; i++ {
+		lines = append(lines, "+"+strings.Repeat("x", 100))
+	}
+	m.SetContent(strings.Join(lines, "\n"))
+
+	out := m.viewWithScrollbar()
+	for i, line := range strings.Split(out, "\n") {
+		w := lipgloss.Width(line)
+		if w != m.vp.Width+1 { // +1 for the trailing scrollbar track/thumb column
+			t.Fatalf("line %d visible width = %d, want %d (panel width + scrollbar column); line = %q", i, w, m.vp.Width+1, line)
+		}
+	}
 }
 
 func TestDiffModel_SetContentRawSkipsDiffColoring(t *testing.T) {
