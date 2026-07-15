@@ -52,14 +52,24 @@ func TestRenderPromptModal_ConfirmShowsPendingLabel(t *testing.T) {
 	}
 }
 
-func TestHelpContent_IncludesFocusedPanelAndGlobalSections(t *testing.T) {
+func TestBuildHelpRows_IncludesFocusedPanelAndGlobalSections(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	m.focus = focusHistory
-	got := m.helpContent()
-	if !strings.Contains(got, "Drop (revert) selected revision") {
-		t.Fatalf("helpContent() for focusHistory missing its local rows: %q", got)
+	rows := m.buildHelpRows()
+
+	var hasLocal, hasGlobal bool
+	for _, r := range rows {
+		if r.desc == "Drop (revert) selected revision" {
+			hasLocal = true
+		}
+		if r.desc == "Close this help" {
+			hasGlobal = true
+		}
 	}
-	if !strings.Contains(got, "Close this help") {
-		t.Fatalf("helpContent() missing the Global section: %q", got)
+	if !hasLocal {
+		t.Fatalf("buildHelpRows() for focusHistory missing its local rows: %+v", rows)
+	}
+	if !hasGlobal {
+		t.Fatalf("buildHelpRows() missing the Global section: %+v", rows)
 	}
 }

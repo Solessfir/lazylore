@@ -1,12 +1,12 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -70,15 +70,17 @@ type Model struct {
 	prompt                 promptKind
 	input                  textinput.Model
 	pendingDiscardPath     string
-	pendingDiscardIsDir    bool           // true when `d` was pressed on a directory row
-	pendingDiscardDirMixed bool           // only meaningful when pendingDiscardIsDir: true when the directory has both staged and unstaged files under it - the only case "discard unstaged" means anything (see discardUnstagedInDirCmd: lore staging is all-or-nothing per file, so a single file is never "mixed")
-	pendingResetRevision   string         // revision `g` (branch reset) will target once confirmed
-	pendingResetLabel      string         // human phrase for the confirm popup + command log, e.g. "Reset current branch to main"
-	pendingRevertMessage   string         // auto-commit message `d` (Drop/revert) will pass to lore, e.g. `Revert "oops"`
-	pendingForceUnlockPath string         // path `L` (unlock) will force-release once confirmed, when it's someone else's lock
-	selectMode             bool           // mouse capture dropped so the terminal can select text (mirrors lazyp4)
-	showHelp               bool           // "?" keybindings popup (see modal.go), mirrors lazyp4's own help overlay
-	helpViewport           viewport.Model // scrolls the keybindings popup's body (j/k/arrows/mouse wheel via its own default keymap)
+	pendingDiscardIsDir    bool   // true when `d` was pressed on a directory row
+	pendingDiscardDirMixed bool   // only meaningful when pendingDiscardIsDir: true when the directory has both staged and unstaged files under it - the only case "discard unstaged" means anything (see discardUnstagedInDirCmd: lore staging is all-or-nothing per file, so a single file is never "mixed")
+	pendingResetRevision   string // revision `g` (branch reset) will target once confirmed
+	pendingResetLabel      string // human phrase for the confirm popup + command log, e.g. "Reset current branch to main"
+	pendingRevertMessage   string // auto-commit message `d` (Drop/revert) will pass to lore, e.g. `Revert "oops"`
+	pendingForceUnlockPath string // path `L` (unlock) will force-release once confirmed, when it's someone else's lock
+	selectMode             bool   // mouse capture dropped so the terminal can select text (mirrors lazyp4)
+	showHelp               bool   // "?" keybindings popup (see modal.go), mirrors lazyp4's own help overlay
+	helpRows               []helpRow
+	helpCursor             int // index into helpRows of the selected row (never a section header)
+	helpWidth, helpHeight  int // popup content size, computed once in openHelp
 
 	// pendingFileOps guards optimistic-UI re-entrancy: "stage:"+path or
 	// "lock:"+path while that path's background lore command is still in
@@ -485,24 +487,32 @@ func (m *Model) toggleDirCollapse(path string) tea.Cmd {
 	return m.rebuildFileItems()
 }
 
-// openHelp builds the "?" keybindings popup's content for the currently
-// focused panel and sizes its viewport to fit the content (capped to the
-// terminal, so it never overflows on a small window).
+// openHelp builds the "?" keybindings popup's row list for the currently
+// focused panel. The popup's height is a fixed fraction of the terminal
+// (like every other panel), not sized to the row count, scrolling instead
+// of growing when there are more rows than fit.
 func (m *Model) openHelp() {
 	m.showHelp = true
-	content := m.helpContent()
-	lines := strings.Split(content, "\n")
+	m.helpRows = m.buildHelpRows()
+	keyColWidth := 0
+	for _, r := range m.helpRows {
+		if !r.section {
+			keyColWidth = max(keyColWidth, lipgloss.Width(r.key))
+		}
+	}
 	longest := 0
-	for _, l := range lines {
-		if w := lipgloss.Width(l); w > longest {
+	for _, r := range m.helpRows {
+		line := strings.Repeat(" ", keyColWidth+2) + fmt.Sprintf("── %s ──", r.key)
+		if !r.section {
+			line = fmt.Sprintf("%*s  %s", keyColWidth, r.key, r.desc)
+		}
+		if w := lipgloss.Width(line); w > longest {
 			longest = w
 		}
 	}
-	m.helpViewport = viewport.New(
-		min(longest, max(20, m.width-8)),
-		min(len(lines), max(3, m.height-6)),
-	)
-	m.helpViewport.SetContent(content)
+	m.helpWidth = min(longest, max(20, m.width-8))
+	m.helpHeight = max(3, (m.height-6)/2)
+	m.helpCursor = firstSelectable(m.helpRows)
 }
 
 // clearAppStatus hides the spinner/status line and bumps statusGen so any
@@ -1057,12 +1067,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		if m.showHelp {
-			// Forward for mouse-wheel scrolling (viewport.Model handles it
-			// via its own MouseWheelEnabled default) - other clicks harmlessly
-			// no-op inside the viewport rather than reaching panels underneath.
-			var cmd tea.Cmd
-			m.helpViewport, cmd = m.helpViewport.Update(msg)
-			return m, cmd
+			// Mouse wheel moves the selection like j/k; other clicks
+			// harmlessly no-op instead of reaching panels underneath.
+			switch msg.Button {
+			case tea.MouseButtonWheelDown:
+				m.helpCursor = nextSelectable(m.helpRows, m.helpCursor)
+			case tea.MouseButtonWheelUp:
+				m.helpCursor = prevSelectable(m.helpRows, m.helpCursor)
+			}
+			return m, nil
 		}
 		if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
 			return m.handleMouseWheel(msg)
@@ -1079,14 +1092,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "esc", "?":
 				m.showHelp = false
-				return m, nil
+			case "j", "down":
+				m.helpCursor = nextSelectable(m.helpRows, m.helpCursor)
+			case "k", "up":
+				m.helpCursor = prevSelectable(m.helpRows, m.helpCursor)
 			}
-			// Everything else (j/k, arrows, pgup/pgdown, ...) scrolls the
-			// popup - viewport.Model's own default keymap handles it;
-			// unrecognized keys are a harmless no-op inside it.
-			var cmd tea.Cmd
-			m.helpViewport, cmd = m.helpViewport.Update(msg)
-			return m, cmd
+			// Any other key is a harmless no-op instead of closing the popup.
+			return m, nil
 		}
 		if m.prompt != promptNone {
 			return m.handlePromptKey(msg)

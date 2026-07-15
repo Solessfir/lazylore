@@ -86,10 +86,14 @@ func (m Model) renderDiscardMenuModal() string {
 }
 
 // helpRow is one line of the keybindings overlay: either a section header
-// (Local/Global) or a key/description pair.
+// (Local/Global), a key/description pair, or a blank spacer. Blank is its
+// own row (not synthesized at render time) so every row costs exactly one
+// rendered line - the scroll math (scrollWindowStart, shared with the list
+// panels) assumes that 1:1 mapping between row index and screen line.
 type helpRow struct {
 	key, desc string
 	section   bool
+	blank     bool
 }
 
 // localHelpRows returns the current panel's own bindings, describing the
@@ -104,7 +108,7 @@ func (m Model) localHelpRows() []helpRow {
 			{key: "enter", desc: "Expand/collapse folder, or show the selected file's diff"},
 			{key: "c", desc: "Commit staged changes"},
 			{key: "e", desc: "Edit file in $VISUAL/$EDITOR"},
-			{key: "d", desc: "Discard changes to selected file/folder (x - all, u - unstaged only)"},
+			{key: "d", desc: "Discard changes to selected file/folder"},
 			{key: "D", desc: "Discard ALL changes"},
 			{key: "L", desc: "Toggle file lock"},
 		}
@@ -131,56 +135,128 @@ func globalHelpRows() []helpRow {
 	return []helpRow{
 		{key: "tab / l", desc: "Next panel"},
 		{key: "shift+tab / h", desc: "Previous panel"},
-		{key: "1-6", desc: "Jump to panel (1 Status, 2 Files, 3 Branches, 4 History, 5 Diff, 6 Command Log)"},
+		{key: "1-6", desc: "Jump to panel"},
 		{key: "[ / ]", desc: "Cycle panel sub-tabs (Branches: Local/Remotes)"},
 		{key: "p", desc: "Pull (sync to latest remote)"},
 		{key: "P", desc: "Push current branch"},
 		{key: "/", desc: "Filter list"},
 		{key: "v", desc: "Select mode (release mouse to copy text)"},
 		{key: "q", desc: "Quit"},
-		{key: "j/k / ↑/↓", desc: "Scroll this help (or mouse wheel)"},
+		{key: "j/k / ↑/↓", desc: "Move selection in this help (or mouse wheel)"},
 		{key: "?, esc", desc: "Close this help"},
 	}
 }
 
-// helpContent renders the full keybindings overlay body: the focused
-// panel's own bindings under "Local", then everything else under "Global" -
-// lazylore's answer to lazygit falling back on "?" for a full list when a
-// binding isn't in the bottom bar.
-func (m Model) helpContent() string {
-	key := lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true) // blue
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))            // white
-	hdr := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true) // green
-
+// buildHelpRows combines the focused panel's own bindings ("Local") with
+// everything else ("Global") into one flat row list for the keybindings
+// overlay - lazylore's answer to lazygit falling back on "?" for a full
+// list when a binding isn't in the bottom bar.
+func (m Model) buildHelpRows() []helpRow {
 	var rows []helpRow
 	if local := m.localHelpRows(); len(local) > 0 {
 		rows = append(rows, helpRow{key: "Local", section: true})
 		rows = append(rows, local...)
 	}
+	if len(rows) > 0 {
+		rows = append(rows, helpRow{blank: true})
+	}
 	rows = append(rows, helpRow{key: "Global", section: true})
 	rows = append(rows, globalHelpRows()...)
-
-	var sb strings.Builder
-	for i, r := range rows {
-		if r.section {
-			if i > 0 {
-				sb.WriteByte('\n')
-			}
-			sb.WriteString(hdr.Render(fmt.Sprintf("── %s ──", r.key)))
-		} else {
-			sb.WriteString(fmt.Sprintf("  %s  %s", key.Render(fmt.Sprintf("%-14s", r.key)), dim.Render(r.desc)))
-		}
-		if i < len(rows)-1 {
-			sb.WriteByte('\n')
-		}
-	}
-	return sb.String()
+	return rows
 }
 
-// renderHelpModal renders the "?" keybindings overlay as a popup: a titled
-// bordered box (title embedded in the top border, like every other panel -
-// see titles.go's renderTitledPanel) wrapping a scrollable viewport, rather
-// than the plain title-as-first-line box the other prompts use.
+// firstSelectable, nextSelectable, and prevSelectable move a cursor between
+// helpRows entries while skipping section headers and blank spacers, which
+// are never selectable themselves.
+func firstSelectable(rows []helpRow) int {
+	for i, r := range rows {
+		if !r.section && !r.blank {
+			return i
+		}
+	}
+	return 0
+}
+
+func nextSelectable(rows []helpRow, from int) int {
+	for i := from + 1; i < len(rows); i++ {
+		if !rows[i].section && !rows[i].blank {
+			return i
+		}
+	}
+	return from
+}
+
+func prevSelectable(rows []helpRow, from int) int {
+	for i := from - 1; i >= 0; i-- {
+		if !rows[i].section && !rows[i].blank {
+			return i
+		}
+	}
+	return from
+}
+
+// selectableRank returns cursor's 1-based position among the selectable
+// rows and the total selectable count, for the "N of M" bottom-border label.
+func selectableRank(rows []helpRow, cursor int) (rank, total int) {
+	for i, r := range rows {
+		if r.section || r.blank {
+			continue
+		}
+		total++
+		if i == cursor {
+			rank = total
+		}
+	}
+	return rank, total
+}
+
+// renderHelpModal renders the "?" keybindings overlay as a selectable,
+// scrollable list (see openHelp/helpCursor) inside a titled border box,
+// matching lazygit's own keybindings popup.
 func (m Model) renderHelpModal() string {
-	return renderTitledPanel(true, m.helpViewport.Width, m.helpViewport.Height, "", "Keybindings", m.helpViewport.View())
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true) // cyan
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))            // white
+	hdrStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true) // green
+
+	// Right-align keys against a shared column so ragged key lengths (e.g.
+	// "y" vs "shift+tab / h") all end at the same point, with the section
+	// header's "── Local ──" starting where descriptions do - lazygit's own
+	// layout for this popup.
+	keyColWidth := 0
+	for _, r := range m.helpRows {
+		if !r.section {
+			keyColWidth = max(keyColWidth, lipgloss.Width(r.key))
+		}
+	}
+
+	start := scrollWindowStart(m.helpCursor, len(m.helpRows), m.helpHeight)
+	end := min(len(m.helpRows), start+m.helpHeight)
+
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		r := m.helpRows[i]
+		switch {
+		case r.blank:
+			// Nothing to write - just the newline below.
+		case r.section:
+			line := strings.Repeat(" ", keyColWidth+2) + fmt.Sprintf("── %s ──", r.key)
+			b.WriteString(hdrStyle.Render(line))
+		case i == m.helpCursor:
+			line := fmt.Sprintf("%*s  %s", keyColWidth, r.key, r.desc)
+			b.WriteString(selectedRowStyle(m.helpWidth).Render(lipgloss.NewStyle().MaxWidth(m.helpWidth).Render(line)))
+		default:
+			line := fmt.Sprintf("%s  %s", keyStyle.Render(fmt.Sprintf("%*s", keyColWidth, r.key)), dimStyle.Render(r.desc))
+			b.WriteString(lipgloss.NewStyle().MaxWidth(m.helpWidth).Render(line))
+		}
+		if i != end-1 {
+			b.WriteByte('\n')
+		}
+	}
+
+	box := renderTitledPanel(true, m.helpWidth, m.helpHeight, "", "Keybindings", b.String())
+	box = withScrollbar(box, start, len(m.helpRows), m.helpHeight, true)
+	if rank, total := selectableRank(m.helpRows, m.helpCursor); total > 0 {
+		box = withBottomCount(box, fmt.Sprintf("%d of %d", rank, total), true)
+	}
+	return box
 }

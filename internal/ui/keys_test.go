@@ -857,23 +857,21 @@ func TestModel_QuestionMarkAgainClosesHelp(t *testing.T) {
 	}
 }
 
-func TestModel_JKeyWhileHelpOpenScrollsViewport(t *testing.T) {
-	// A small terminal height caps the popup below the content's real line
-	// count (see openHelp), guaranteeing there's something to scroll.
+func TestModel_JKeyWhileHelpOpenMovesSelection(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	m.width, m.height = 100, 10
 	(&m).resize()
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
 	m2 := updated.(Model)
-	startOffset := m2.helpViewport.YOffset
+	startCursor := m2.helpCursor
 
 	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
 	m3 := updated.(Model)
 	if !m3.showHelp {
 		t.Fatal("expected showHelp to stay true after 'j'")
 	}
-	if m3.helpViewport.YOffset <= startOffset {
-		t.Fatalf("YOffset = %d, want it to have scrolled down from %d", m3.helpViewport.YOffset, startOffset)
+	if m3.helpCursor <= startCursor {
+		t.Fatalf("helpCursor = %d, want it to have advanced from %d", m3.helpCursor, startCursor)
 	}
 }
 
