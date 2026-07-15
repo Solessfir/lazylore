@@ -73,3 +73,11 @@ type revealStatusMsg struct {
 	gen  int
 	text string
 }
+
+// revealSyncMsg is branchSyncLabel's delayed reveal, same
+// statusRevealDelay/generation pattern as revealStatusMsg - a pull/push that
+// finishes before the delay elapses never flashes the inline spinner.
+type revealSyncMsg struct {
+	gen   int
+	label string
+}

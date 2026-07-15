@@ -31,6 +31,13 @@ type Model struct {
 
 	appStatus string
 	spinner   int
+	// branchSyncLabel is "Pulling"/"Pushing" while one is in flight, shown
+	// next to the current branch name in the Branches panel (see
+	// compactTitleDelegate.syncLabel), matching lazygit's own indicator.
+	// Only actually set after statusRevealDelay via revealSyncMsg - syncGen
+	// gates that reveal the same way statusGen gates revealStatusMsg.
+	branchSyncLabel string
+	syncGen         int
 	// statusGen is bumped every time appStatus is set or cleared. A delayed
 	// reveal (see statusRevealDelay) captures the generation it was
 	// scheduled under; if that no longer matches by the time the delay
@@ -956,7 +963,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		if m.appStatus != "" {
+		if m.appStatus != "" || m.branchSyncLabel != "" {
 			m.spinner = (m.spinner + 1) % 4
 			return m, tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
 				return tickMsg{}
@@ -991,6 +998,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.appStatus = msg.text
+		return m, tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
+			return tickMsg{}
+		})
+
+	case revealSyncMsg:
+		if msg.gen != m.syncGen {
+			return m, nil
+		}
+		m.branchSyncLabel = msg.label
 		return m, tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
 			return tickMsg{}
 		})
@@ -1125,6 +1141,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case actionDoneMsg:
 		(&m).clearAppStatus()
+		m.branchSyncLabel = ""
+		m.syncGen++
 		if msg.opKey != "" {
 			(&m).setPendingFileOp(msg.opKey, false)
 		}

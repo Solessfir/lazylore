@@ -207,7 +207,12 @@ func (m Model) View() string {
 			case m.branches.SettingFilter():
 				v = strings.TrimLeft(m.branches.View(), "\n\r")
 			default:
-				v = renderListWindow(m.branches, compactTitleDelegate{focused: m.focus == focusBranches, width: m.panelWidth}, effBranchesH, m.branchesScrollOverride)
+				syncLabel := ""
+				if m.branchSyncLabel != "" {
+					spinners := []string{"/", "-", "\\", "|"}
+					syncLabel = m.branchSyncLabel + " " + spinners[m.spinner%4]
+				}
+				v = renderListWindow(m.branches, compactTitleDelegate{focused: m.focus == focusBranches, width: m.panelWidth, syncLabel: syncLabel}, effBranchesH, m.branchesScrollOverride)
 			}
 			p := renderDualTitledPanel(m.focus == focusBranches, m.panelWidth, effBranchesH, "3", "Local branches", "Remotes", !m.showRemoteBranches, v)
 			if m.branchesTotal > 0 {

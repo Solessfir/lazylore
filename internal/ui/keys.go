@@ -3,6 +3,7 @@ package ui
 import (
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -123,14 +124,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 
 	case "p":
+		m.syncGen++
+		gen := m.syncGen
 		return m, tea.Batch(
-			func() tea.Msg { return setAppStatusMsg("Pulling...") },
+			tea.Tick(statusRevealDelay, func(time.Time) tea.Msg { return revealSyncMsg{gen: gen, label: "Pulling"} }),
 			pullCmd(m.runner),
 		)
 
 	case "P":
+		m.syncGen++
+		gen := m.syncGen
 		return m, tea.Batch(
-			func() tea.Msg { return setAppStatusMsg("Pushing...") },
+			tea.Tick(statusRevealDelay, func(time.Time) tea.Msg { return revealSyncMsg{gen: gen, label: "Pushing"} }),
 			pushCmd(m.runner),
 		)
 
