@@ -32,6 +32,8 @@ func TestCurrentFooter_StillShowsError(t *testing.T) {
 
 func TestRenderPromptModal_CommitShowsInput(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updatedStatus, _ := m.Update(statusMsg{status: lore.Status{Staged: []lore.FileChange{{Status: 'A', Path: "a.txt"}}}})
+	m = updatedStatus.(Model)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
 	m2 := updated.(Model)
 	got := m2.renderPromptModal()

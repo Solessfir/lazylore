@@ -498,6 +498,8 @@ func TestModel_CommitPromptSubmitsMessage(t *testing.T) {
 		"--json commit hi": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
+	updatedStatus, _ := m.Update(statusMsg{status: lore.Status{Staged: []lore.FileChange{{Status: 'A', Path: "a.txt"}}}})
+	m = updatedStatus.(Model)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
 	m2 := updated.(Model)

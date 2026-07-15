@@ -38,6 +38,12 @@ type Model struct {
 	// gates that reveal the same way statusGen gates revealStatusMsg.
 	branchSyncLabel string
 	syncGen         int
+
+	// pendingCommitAfterStageAll: user confirmed "stage all and commit" from
+	// the promptConfirmStageAllForCommit prompt - opens the commit input
+	// once that stage-all lands (see actionDoneMsg handling), matching
+	// lazygit's own promptToStageAllAndRetry.
+	pendingCommitAfterStageAll bool
 	// statusGen is bumped every time appStatus is set or cleared. A delayed
 	// reveal (see statusRevealDelay) captures the generation it was
 	// scheduled under; if that no longer matches by the time the delay
@@ -648,6 +654,15 @@ func (m *Model) setDirStagedByPrefix(dirPath string, from, to bool) tea.Cmd {
 // `unstage` on a directory path recurse over already-dirty files under it
 // without needing --scan, so one call covers the whole subtree; "." stands
 // in for the repo root since lore has no path for the synthetic "/" row.
+// openCommitPrompt opens the commit-message input (see renderCommitModal).
+func (m *Model) openCommitPrompt() {
+	m.prompt = promptCommit
+	m.input = textinput.New()
+	m.input.Prompt = ""
+	m.input.Width = 60
+	m.input.Focus()
+}
+
 func (m *Model) toggleDirStage(dirPath string) tea.Cmd {
 	hasUnstaged, hasStaged := m.dirStageCounts(dirPath)
 	if !hasUnstaged && !hasStaged {
@@ -1187,6 +1202,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.confirm != nil {
 			msg.confirm(&m)
+		}
+		if m.pendingCommitAfterStageAll && msg.opKey == "stage:." {
+			m.pendingCommitAfterStageAll = false
+			(&m).openCommitPrompt()
+			m.log.AppendAction(msg.label, msg.commands, nil)
+			return m, tea.Batch(refreshCmd(m.runner), textinput.Blink)
 		}
 		m.log.AppendAction(msg.label, msg.commands, nil)
 		if len(m.pendingFileOps) > 0 {

@@ -226,6 +226,39 @@ func withBottomCount(rendered, count string, focused bool) string {
 	return strings.Join(lines, "\n")
 }
 
+// withTopRightCount overwrites the tail of a rendered panel's top border
+// with a right-aligned count (e.g. char count of a commit summary input),
+// matching lazygit's own commit-summary box. A no-op when count is "".
+func withTopRightCount(rendered, count string, focused bool) string {
+	if count == "" {
+		return rendered
+	}
+	lines := strings.Split(rendered, "\n")
+	if len(lines) == 0 {
+		return rendered
+	}
+	top := lines[0]
+	w := lipgloss.Width(top)
+	countStr := " " + count + " "
+	countW := lipgloss.Width(countStr)
+	if w < countW+2 {
+		return rendered
+	}
+
+	frameCol := borderUnfocused
+	if focused {
+		frameCol = borderFocused
+	}
+	frameStyle := lipgloss.NewStyle().Foreground(frameCol)
+	if focused {
+		frameStyle = frameStyle.Bold(true)
+	}
+
+	trimmed := lipgloss.NewStyle().MaxWidth(w - countW - 1).Render(top)
+	lines[0] = trimmed + frameStyle.Render(countStr) + frameStyle.Render("╮")
+	return strings.Join(lines, "\n")
+}
+
 // withScrollbar replaces a rendered panel's right border character with a
 // thumb glyph ("▐") on whichever content rows the scroll thumb currently
 // covers - matching lazygit's own scrollbar look: the thumb merges directly

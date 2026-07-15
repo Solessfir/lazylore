@@ -35,7 +35,9 @@ func renderModal(title, body, hint string) string {
 func (m Model) renderPromptModal() string {
 	switch m.prompt {
 	case promptCommit:
-		return renderModal("Commit", m.input.View(), "enter - commit   esc - cancel")
+		return m.renderCommitModal()
+	case promptConfirmStageAllForCommit:
+		return renderModal("No files staged", "You have not staged any files. Commit all files?", "y - confirm   n / esc - cancel")
 	case promptNewBranch:
 		return renderModal("New Branch", m.input.View(), "enter - create   esc - cancel")
 	case promptDiscardMenu:
@@ -52,6 +54,17 @@ func (m Model) renderPromptModal() string {
 	default:
 		return ""
 	}
+}
+
+// renderCommitModal renders the commit-message prompt as a titled border
+// box (title + live char count baked into the top border, like every other
+// panel - see titles.go) instead of a bold inline title line, matching
+// lazygit's own "Commit summary" box.
+func (m Model) renderCommitModal() string {
+	box := focusedPanelStyle.Width(m.input.Width).Height(1).Render(m.input.View())
+	box = injectTitle(box, "", "Commit summary", 0, true)
+	box = withTopRightCount(box, fmt.Sprintf("%d", len([]rune(m.input.Value()))), true)
+	return box
 }
 
 // renderDiscardMenuModal renders the "d" discard menu (x = discard all,

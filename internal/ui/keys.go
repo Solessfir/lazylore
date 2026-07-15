@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"time"
@@ -35,6 +36,7 @@ const (
 	promptConfirmBranchReset
 	promptConfirmRevert
 	promptConfirmForceUnlock
+	promptConfirmStageAllForCommit
 )
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -116,11 +118,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "c":
-		m.prompt = promptCommit
-		m.input = textinput.New()
-		m.input.Placeholder = "commit message"
-		m.input.Width = 50
-		m.input.Focus()
+		hasUnstaged, hasStaged := m.dirStageCounts("")
+		if !hasUnstaged && !hasStaged {
+			m.err = errors.New("No files staged")
+			return m, nil
+		}
+		if !hasStaged {
+			m.prompt = promptConfirmStageAllForCommit
+			return m, nil
+		}
+		m.openCommitPrompt()
 		return m, textinput.Blink
 
 	case "p":
@@ -393,6 +400,15 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.prompt == promptConfirmStageAllForCommit {
+		m.prompt = promptNone
+		if msg.String() == "y" {
+			m.pendingCommitAfterStageAll = true
+			return m, m.toggleDirStage("")
+		}
+		return m, nil
+	}
+
 	if m.prompt == promptConfirmDiscardAll {
 		m.prompt = promptNone
 		if msg.String() == "y" {
@@ -465,11 +481,13 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		value := strings.TrimSpace(m.input.Value())
 		kind := m.prompt
-		m.prompt = promptNone
-		m.input.Blur()
-		if value == "" {
+		if value == "" && (kind == promptCommit || kind == promptNewBranch) {
+			// Keep the prompt open instead of silently closing it - an empty
+			// commit message/branch name isn't a valid submission.
 			return m, nil
 		}
+		m.prompt = promptNone
+		m.input.Blur()
 		switch kind {
 		case promptCommit:
 			return m, commitCmd(m.runner, value)
