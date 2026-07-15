@@ -45,6 +45,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.selectMode = true
 		return m, tea.DisableMouse
 
+	case "ctrl+g":
+		// TEMPORARY debug trigger (see view.go's debugDumpLayout) - dumps
+		// the current frame to <repoRoot>\lazylore-debug.txt unconditionally,
+		// for manually capturing a garbled/blank screen on demand.
+		debugDumpLayout(m, m.View(), true)
+		return m, nil
+
 	case "?":
 		(&m).openHelp()
 		return m, nil

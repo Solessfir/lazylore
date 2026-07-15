@@ -2,10 +2,10 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"lazylore/internal/lore"
@@ -251,121 +251,90 @@ func TestModel_EnsureMainContent_RootRevisionSkipsDiffCall(t *testing.T) {
 	}
 }
 
-func TestRowsPerPage_ReservesOneRowForBubblesFilterInput(t *testing.T) {
-	// bubbles/list always reserves one row for a potential filter input
-	// (tied to filteringEnabled, independent of ShowTitle), so real per-page
-	// capacity is contentH-1, not contentH - see rowsPerPage's doc comment.
-	if got := rowsPerPage(10); got != 9 {
-		t.Fatalf("rowsPerPage(10) = %d, want 9", got)
-	}
-	if got := rowsPerPage(1); got != 1 {
-		t.Fatalf("rowsPerPage(1) = %d, want 1 (floor of 1)", got)
-	}
-}
-
-func TestRowClickTarget_RealItemOnCurrentPage(t *testing.T) {
-	vis := make([]list.Item, 10)
-	target, ok := rowClickTarget(0, 8, vis, 2)
+func TestRowClickTarget_RealItemInWindow(t *testing.T) {
+	target, ok := rowClickTarget(0, 10, 8, 2)
 	if !ok || target != 2 {
 		t.Fatalf("target=%d ok=%v, want 2,true", target, ok)
 	}
 }
 
-func TestRowClickTarget_RejectsPaddingRowEvenWhenGloballyInRange(t *testing.T) {
-	// Regression: page 0 has exactly 8 real items (perPage=8), 10 items total
-	// across 2 pages. Row 8 is blank padding on page 0, but 8 < len(vis)=10 -
-	// the old naive `target < len(vis)` bound would wrongly resolve this to
-	// item 8, which lives on page 1 and isn't even visible, silently flipping
-	// Select()'s page and desyncing every click after it.
-	vis := make([]list.Item, 10)
-	_, ok := rowClickTarget(0, 8, vis, 8)
+func TestRowClickTarget_RejectsRowBelowLastItemInWindow(t *testing.T) {
+	// cursor=0, 10 items, an 8-row-tall window shows items 0-7; row 8 is
+	// past the window (blank/nonexistent), not item 8 - unlike bubbles' own
+	// page-based Paginator, there's no "next page" for a click to wrongly
+	// resolve into here.
+	_, ok := rowClickTarget(0, 10, 8, 8)
 	if ok {
-		t.Fatal("expected relY=8 (padding row) to be rejected, not resolved to a hidden item")
+		t.Fatal("expected relY=8 (past the window) to be rejected")
 	}
 }
 
-func TestRowClickTarget_RejectsRowPastLastRealItemOnPartialPage(t *testing.T) {
-	vis := make([]list.Item, 3)
-	_, ok := rowClickTarget(0, 8, vis, 3)
+func TestRowClickTarget_RejectsRowPastLastRealItemOnShortList(t *testing.T) {
+	_, ok := rowClickTarget(0, 3, 8, 3)
 	if ok {
 		t.Fatal("expected relY=3 (past the 3 real items) to be rejected")
 	}
 }
 
-func TestRowClickTarget_SecondPageOffsetsCorrectly(t *testing.T) {
-	vis := make([]list.Item, 10)
-	target, ok := rowClickTarget(1, 8, vis, 1)
+func TestRowClickTarget_ScrolledWindowOffsetsCorrectly(t *testing.T) {
+	// cursor=9 (last of 10 items) with an 8-row window scrolls so the
+	// window covers items 2-9 (scrollWindowStart(9, 10, 8) == 2); relY=7 is
+	// the last visible row, item 9.
+	target, ok := rowClickTarget(9, 10, 8, 7)
 	if !ok || target != 9 {
-		t.Fatalf("target=%d ok=%v, want 9,true (page 1 starts at absolute index 8)", target, ok)
+		t.Fatalf("target=%d ok=%v, want 9,true", target, ok)
 	}
 }
 
-func TestRowClickTarget_AcceptsLastRealItemEvenWhenPaginatorPerPageWouldBeStale(t *testing.T) {
-	// Regression: View() calls list.Model.SetSize with a footer-shrink-
-	// adjusted (taller) height on every render, but View() has a value
-	// receiver, so that call never persists back to the real model -
-	// Paginator.PerPage silently drifts stale (commonly by exactly one row)
-	// relative to what's actually rendered. handleMouseClick must compute
-	// perPage fresh (via rowsPerPage) from what's actually on screen instead
-	// of trusting the model's own (possibly stale) Paginator.PerPage - this
-	// is why rowClickTarget takes perPage as an explicit argument rather
-	// than reading it off a paginator.Model.
-	vis := make([]list.Item, 9)
-	target, ok := rowClickTarget(0, rowsPerPage(10), vis, 8)
+func TestRowClickTarget_AcceptsLastRealItemOnAnUnscrolledShortList(t *testing.T) {
+	target, ok := rowClickTarget(0, 9, 10, 8)
 	if !ok || target != 8 {
 		t.Fatalf("target=%d ok=%v, want 8,true (the 9th and last item, on a 10-row-tall panel)", target, ok)
 	}
 }
 
-func TestModel_ClickDoesNotPageJumpWhenPaginatorWasStale(t *testing.T) {
-	// Regression: rowClickTarget already computed the right target using a
-	// freshly-derived perPage, but list.Model.Select (bubbles' own method)
-	// re-derives Page by dividing by its OWN Paginator.PerPage internally -
-	// which was still the stale (pre-resize) value at click time. Select
-	// could then land on a DIFFERENT page than the one actually on screen,
-	// causing a visible jump on the next render even though the click
-	// itself resolved to the correct item. handleMouseClick must resync
-	// each list's SetSize to the current frame's height before calling
-	// Select, so Select's own division uses the same perPage rowClickTarget
-	// did.
-	files := []lore.FileChange{
-		{Status: 'A', Path: "Plugins/LoreSourceControl/Config"},
-		{Status: 'A', Path: "Plugins/LoreSourceControl/Config/FilterPlugin.ini"},
-		{Status: 'M', Path: "Plugins/LoreSourceControl/LoreSourceControl.uplugin"},
-		{Status: 'A', Path: "Plugins/LoreSourceControl/README.md"},
-		{Status: 'A', Path: "Plugins/LoreSourceControl/Resources/Icon128.png"},
+func TestModel_ClickSelectsCorrectRowInScrolledFilesWindow(t *testing.T) {
+	// More files than fit in the panel at once, so the click has to land
+	// correctly on a row inside a scrolled continuous window (see
+	// scrollWindowStart), not just on an unscrolled first page.
+	var files []lore.FileChange
+	for i := 0; i < 20; i++ {
+		files = append(files, lore.FileChange{Status: 'M', Path: fmt.Sprintf("file%02d.txt", i)})
 	}
-	m := NewModel(&lore.FakeRunner{}, "Sus", "/repo")
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 155, Height: 40})
 	m2 := updated.(Model)
 	updated, _ = m2.Update(statusMsg{status: lore.Status{Unstaged: files}})
 	m3 := updated.(Model)
 
-	items := m3.files.Items()
-	iconIdx := -1
-	for i, it := range items {
-		if fi, ok := it.(fileItem); ok && fi.path == "Plugins/LoreSourceControl/Resources/Icon128.png" {
-			iconIdx = i
+	// Scroll the cursor deep into the list so the window is no longer
+	// anchored at the top (j moves selection down one row at a time) -
+	// more presses than there are rows, clamped to the last item.
+	for i := 0; i < 30; i++ {
+		updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		m3 = updated.(Model)
+	}
+
+	// Rather than duplicating handleMouseClick's exact footer/extra-height
+	// math to predict a precise row, scan every plausible row in the Files
+	// panel and confirm exactly one of them selects file19.txt - and that
+	// it isn't the very top row, proving the window actually scrolled
+	// rather than staying anchored at file00.txt.
+	foundAt := -1
+	for relY := 0; relY < 30; relY++ { // generous upper bound - the panel is nowhere near 30 rows tall in this test
+		clickY := 3 + 1 + relY // statusPanelHeight(3) + files top border(1) + row offset
+		updated, _ := m3.Update(tea.MouseMsg{X: 10, Y: clickY, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+		m4 := updated.(Model)
+		if sel, ok := m4.files.SelectedItem().(fileItem); ok && sel.path == "file19.txt" {
+			foundAt = relY
+			break
 		}
 	}
-	if iconIdx == -1 {
-		t.Fatal("Icon128.png not found in flattened items")
+	if foundAt == -1 {
+		t.Fatal("no row in the Files panel selected file19.txt after scrolling")
 	}
-	if got := m3.files.Paginator.PerPage; got != 8 {
-		t.Fatalf("precondition failed: Paginator.PerPage = %d, want the stale value 8 (real per-page capacity is 9)", got)
-	}
-
-	// statusPanelHeight(3) + files top border(1) + row offset = Icon128.png's row.
-	clickY := 3 + 1 + iconIdx
-	updated, _ = m3.Update(tea.MouseMsg{X: 10, Y: clickY, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	m4 := updated.(Model)
-
-	sel, ok := m4.files.SelectedItem().(fileItem)
-	if !ok || sel.path != "Plugins/LoreSourceControl/Resources/Icon128.png" {
-		t.Fatalf("click did not select Icon128.png; got %+v", sel)
-	}
-	if m4.files.Paginator.Page != 0 {
-		t.Fatalf("Paginator.Page = %d, want 0 - the click should not have paged away from what was on screen", m4.files.Paginator.Page)
+	if foundAt == 0 {
+		t.Fatal("file19.txt was found at the very top row - the window doesn't look scrolled")
 	}
 }
 

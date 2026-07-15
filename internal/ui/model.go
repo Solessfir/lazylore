@@ -174,41 +174,26 @@ func (m *Model) syncFocusDelegates() {
 	m.history.SetShowPagination(false)
 }
 
-// rowsPerPage is bubbles/list's own real per-page item capacity for a panel
-// whose content area is contentH rows tall (fileDelegate/compactTitleDelegate
-// both report Height()=1, Spacing()=0). bubbles/list.Model always reserves
-// one row at the top of its own View() output for a potential filter input
-// (tied to filteringEnabled, independent of ShowTitle - see list.go's
-// updatePagination), which lazylore's border rendering strips and lipgloss
-// re-pads at the bottom instead - so real capacity is contentH-1, not contentH.
-func rowsPerPage(contentH int) int {
-	return max(1, contentH-1)
-}
-
 // rowClickTarget maps a list panel's clicked row (relY, 0-based within the
-// panel's content area) to the absolute item index it corresponds to on the
-// CURRENT page, or ok=false if relY falls on a blank/padding row.
+// panel's content area) to the absolute item index it corresponds to, or
+// ok=false if relY falls below the last real row on screen.
 //
-// perPage must be freshly computed from what's actually on screen (see
-// rowsPerPage), not read from the list's own Paginator.PerPage: View() calls
-// list.Model.SetSize with a footer-shrink-adjusted height on every render,
-// but View() has a value receiver, so that call never persists back to the
-// real model - Paginator.PerPage silently drifts stale (commonly by exactly
-// one row) relative to what's actually rendered. Bounding the click only
-// against the TOTAL item count across all pages (`target < len(vis)`) then
-// let a click on the last real row - or the padding row below it - resolve
-// to a real item on a page that isn't even visible, silently flipping
-// Select()'s page and desyncing every click after it from what's on screen.
-func rowClickTarget(page, perPage int, vis []list.Item, relY int) (int, bool) {
+// cursor/total/perPage must match what renderListWindow (see items.go) was
+// just called with, so the two can never disagree about what's on screen -
+// scrollWindowStart is the single source of truth both derive from, rather
+// than each independently computing (or, as before this switched away from
+// bubbles/list.Model's own pagination, reading) a page boundary that could
+// drift out of sync between the render and the click.
+func rowClickTarget(cursor, total, perPage int, relY int) (int, bool) {
 	if perPage < 1 {
 		perPage = 1
 	}
-	pageStart := page * perPage
-	itemsOnPage := min(perPage, len(vis)-pageStart)
-	if relY < 0 || relY >= itemsOnPage {
+	start := scrollWindowStart(cursor, total, perPage)
+	itemsOnScreen := min(perPage, total-start)
+	if relY < 0 || relY >= itemsOnScreen {
 		return 0, false
 	}
-	return pageStart + relY, true
+	return start + relY, true
 }
 
 // handleMouseClick handles left-clicks to focus panels and select items inside
@@ -253,15 +238,13 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	effHistoryH := max(0, leftOuters[3]-borderHeight)
 	effDiffH := m.diffHeight + extra
 
-	// Resync each list's own Paginator.PerPage to the height actually
-	// rendered THIS frame before doing any click math. list.Model.Select
-	// (called below) divides by its own Paginator.PerPage internally, which
-	// - like the field rowsPerPage/rowClickTarget already route around on
-	// the read side - drifts stale relative to what's on screen (View() has
-	// a value receiver, so its own SetSize call never persists). Without
-	// this resync, Select still re-derives Page from the stale PerPage and
-	// can jump to a different page on the very next render, even though the
-	// clicked row was computed correctly - a visible "shift" on click.
+	// list.Model.Select (called below) stores the target index as
+	// Page*Paginator.PerPage+cursor internally, so it needs an accurate
+	// PerPage for that round-trip to come back out right on the next
+	// Index() read - resync each list's PerPage to the height actually
+	// rendered THIS frame (a footer-shrink-adjusted height View() computes
+	// fresh every render, via a value receiver, so it never persists back
+	// to the real model on its own) before doing any click math.
 	m.files.SetSize(m.panelWidth, effFilesH)
 	m.branches.SetSize(m.panelWidth, effBranchesH)
 	m.history.SetSize(m.panelWidth, effHistoryH)
@@ -301,7 +284,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if y >= filesBoxTop+1 && y < filesBoxTop+filesH-1 {
 				relY := y - (filesBoxTop + 1)
 				if relY >= 0 && relY < effFilesH {
-					if target, ok := rowClickTarget(m.files.Paginator.Page, rowsPerPage(effFilesH), m.files.VisibleItems(), relY); ok {
+					if target, ok := rowClickTarget(m.files.Index(), len(m.files.VisibleItems()), effFilesH, relY); ok {
 						m.files.Select(target)
 					}
 				}
@@ -323,7 +306,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if y >= branchesBoxTop+1 && y < branchesBoxTop+branchesH-1 {
 				relY := y - (branchesBoxTop + 1)
 				if relY >= 0 && relY < effBranchesH {
-					if target, ok := rowClickTarget(m.branches.Paginator.Page, rowsPerPage(effBranchesH), m.branches.VisibleItems(), relY); ok {
+					if target, ok := rowClickTarget(m.branches.Index(), len(m.branches.VisibleItems()), effBranchesH, relY); ok {
 						m.branches.Select(target)
 					}
 				}
@@ -333,7 +316,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if y >= historyBoxTop+1 && y < historyBoxTop+historyH-1 {
 				relY := y - (historyBoxTop + 1)
 				if relY >= 0 && relY < effHistoryH {
-					if target, ok := rowClickTarget(m.history.Paginator.Page, rowsPerPage(effHistoryH), m.history.VisibleItems(), relY); ok {
+					if target, ok := rowClickTarget(m.history.Index(), len(m.history.VisibleItems()), effHistoryH, relY); ok {
 						m.history.Select(target)
 					}
 				}

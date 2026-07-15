@@ -40,6 +40,63 @@ func lockBadgeStyle(lockedByMe bool) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
 }
 
+// scrollMargin is how many rows of context past the cursor scrollWindowStart
+// tries to keep visible (matching lazygit/vim "scrolloff" - you see a couple
+// of upcoming rows before the window scrolls, rather than the cursor sitting
+// dead on the last visible row before anything moves).
+const scrollMargin = 2
+
+// scrollWindowStart returns the first visible index for a continuous
+// (non-paginated) scroll window of size height around cursor, clamped to
+// [0, total-height]. Shared by renderListWindow and rowClickTarget so
+// rendering and click hit-testing can never disagree about what's on
+// screen - unlike bubbles/list.Model's own Paginator, which pages in fixed
+// jumps (Paginator.Page = index/PerPage) rather than scrolling by one row,
+// and pads a short page with blank filler lines even when more items exist
+// just below the current page boundary (reported as a stray blank row
+// mid-list, far from the end of a 92-row tree).
+func scrollWindowStart(cursor, total, height int) int {
+	if height <= 0 || total <= height {
+		return 0
+	}
+	start := 0
+	if cursor+scrollMargin >= height {
+		start = cursor + scrollMargin - height + 1
+	}
+	if start > total-height {
+		start = total - height
+	}
+	if start < 0 {
+		start = 0
+	}
+	return start
+}
+
+// renderListWindow renders m's visible items through delegate in a
+// continuous scroll window (see scrollWindowStart) instead of calling
+// list.Model's own View(), which would page in fixed jumps. Only valid
+// while m isn't actively showing its filter-input row (SettingFilter()) -
+// that row isn't accounted for here, so callers fall back to m.View()
+// while typing a filter (see view.go).
+func renderListWindow(m list.Model, delegate list.ItemDelegate, height int) string {
+	items := m.VisibleItems()
+	if len(items) == 0 || height <= 0 {
+		return ""
+	}
+	cur := m.Index()
+	start := scrollWindowStart(cur, len(items), height)
+	end := min(len(items), start+height)
+
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		delegate.Render(&b, m, i, items[i])
+		if i != end-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
 func fileStatusColor(staged bool) lipgloss.Color {
 	if staged {
 		return fileStagedColor

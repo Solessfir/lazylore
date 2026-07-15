@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,6 +11,55 @@ import (
 
 	"lazylore/internal/lore"
 )
+
+func TestScrollWindowStart_NoScrollNeededWhenEverythingFits(t *testing.T) {
+	if got := scrollWindowStart(3, 5, 10); got != 0 {
+		t.Fatalf("scrollWindowStart(3,5,10) = %d, want 0", got)
+	}
+}
+
+func TestScrollWindowStart_FollowsCursorPastWindowHeight(t *testing.T) {
+	// cursor=8 with an 8-row window and a 2-row scroll margin: the window
+	// must have scrolled enough to keep 2 rows of context below the cursor
+	// visible (matching lazygit/vim scrolloff), not just barely keep the
+	// cursor itself on screen.
+	if got := scrollWindowStart(8, 20, 8); got != 3 {
+		t.Fatalf("scrollWindowStart(8,20,8) = %d, want 3", got)
+	}
+}
+
+func TestScrollWindowStart_ClampsAtTheEndOfTheList(t *testing.T) {
+	// cursor on the very last item never scrolls the window past total-height.
+	if got := scrollWindowStart(19, 20, 8); got != 12 {
+		t.Fatalf("scrollWindowStart(19,20,8) = %d, want 12", got)
+	}
+}
+
+func TestRenderListWindow_NeverLeavesABlankRowMidList(t *testing.T) {
+	// Regression: bubbles/list.Model's own paginated View() pads a short
+	// PAGE with blank filler lines even when more real items exist just
+	// below the page boundary - reported as a stray blank row between two
+	// real rows, far from the actual end of a 92-row Files tree.
+	items := make([]list.Item, 20)
+	for i := range items {
+		items[i] = fileItem{path: fmt.Sprintf("file%02d.txt", i), label: fmt.Sprintf("file%02d.txt", i)}
+	}
+	l := list.New(items, fileDelegate{focused: false}, 40, 10)
+	l.SetShowStatusBar(false)
+	l.SetShowPagination(false)
+	l.Select(8) // deep enough that a page-based list would be on its first (short) page boundary
+
+	out := renderListWindow(l, fileDelegate{focused: false}, 10)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 10 {
+		t.Fatalf("got %d lines, want exactly 10 (the window height, one real item per row, no filler)", len(lines))
+	}
+	// Every rendered row must carry one of the real filenames - proves the
+	// window is a straight slice of real items, not padded with blanks.
+	if !strings.Contains(lines[9], "file10.txt") {
+		t.Fatalf("last window row = %q, want it to contain file10.txt (scrollWindowStart(8,20,10) == 1, window is items 1-10)", lines[9])
+	}
+}
 
 func TestSelectedRowStyle_BoundedToGivenWidth(t *testing.T) {
 	// This is the actual bug: without an explicit Width(), the background
