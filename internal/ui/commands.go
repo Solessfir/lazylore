@@ -305,6 +305,14 @@ func resetBranchCmd(r lore.Runner, revision, label string) tea.Cmd {
 	}
 }
 
+func mergeBranchCmd(r lore.Runner, name, label string) tea.Cmd {
+	return func() tea.Msg {
+		rr := &runRecorder{inner: r}
+		_, err := lore.MergeBranch(rr, name)
+		return actionDoneMsg{label: label, err: err, commands: rr.commands}
+	}
+}
+
 func syncToCmd(r lore.Runner, revision, label string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}

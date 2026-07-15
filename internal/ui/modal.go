@@ -46,6 +46,8 @@ func (m Model) renderPromptModal() string {
 		return renderModal("Discard All Changes", "Discard ALL changes in the working tree?", "y - confirm   n / esc - cancel")
 	case promptConfirmBranchReset:
 		return renderModal("Reset Branch", m.pendingResetLabel+"?", "y - confirm   n / esc - cancel")
+	case promptConfirmBranchMerge:
+		return renderModal("Merge Branch", m.pendingMergeLabel+"?", "y - confirm   n / esc - cancel")
 	case promptConfirmRevert:
 		return renderModal("Drop Revision", m.pendingResetLabel+"?", "y - confirm   n / esc - cancel")
 	case promptConfirmForceUnlock:
@@ -116,6 +118,7 @@ func (m Model) localHelpRows() []helpRow {
 		return []helpRow{
 			{key: "space", desc: "Checkout selected branch"},
 			{key: "n", desc: "Create new branch"},
+			{key: "M", desc: "Merge selected branch into the current one"},
 			{key: "g", desc: "Reset current branch to selected branch"},
 		}
 	case focusHistory:

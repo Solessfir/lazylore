@@ -37,6 +37,7 @@ const (
 	promptConfirmRevert
 	promptConfirmForceUnlock
 	promptConfirmStageAllForCommit
+	promptConfirmBranchMerge
 )
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -283,6 +284,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "M":
+		// Merge selected branch into the current one, matching lazygit's
+		// Branches-panel "M". lore auto-commits a clean merge; a conflicting
+		// one surfaces as an error (see lore.MergeBranch) - lazylore has no
+		// resolve/abort UI to fall into.
+		if m.focus == focusBranches {
+			if item, ok := m.branches.SelectedItem().(branchItem); ok && !item.branch.Current {
+				m.prompt = promptConfirmBranchMerge
+				m.pendingMergeBranch = item.branch.Name
+				m.pendingMergeLabel = "Merge " + item.branch.Name + " into the current branch"
+			}
+		}
+		return m, nil
+
 	case "L":
 		if m.focus == focusFiles {
 			if item, ok := m.files.SelectedItem().(fileItem); ok && !item.isDir {
@@ -405,6 +420,21 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == "y" {
 			m.pendingCommitAfterStageAll = true
 			return m, m.toggleDirStage("")
+		}
+		return m, nil
+	}
+
+	if m.prompt == promptConfirmBranchMerge {
+		m.prompt = promptNone
+		branch := m.pendingMergeBranch
+		label := m.pendingMergeLabel
+		m.pendingMergeBranch = ""
+		m.pendingMergeLabel = ""
+		if msg.String() == "y" {
+			return m, tea.Batch(
+				func() tea.Msg { return setAppStatusMsg("Merging...") },
+				mergeBranchCmd(m.runner, branch, label),
+			)
 		}
 		return m, nil
 	}

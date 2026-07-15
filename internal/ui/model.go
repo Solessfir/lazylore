@@ -76,6 +76,8 @@ type Model struct {
 	pendingResetLabel      string // human phrase for the confirm popup + command log, e.g. "Reset current branch to main"
 	pendingRevertMessage   string // auto-commit message `d` (Drop/revert) will pass to lore, e.g. `Revert "oops"`
 	pendingForceUnlockPath string // path `L` (unlock) will force-release once confirmed, when it's someone else's lock
+	pendingMergeBranch     string // branch `M` will merge into the current one once confirmed
+	pendingMergeLabel      string // human phrase for the confirm popup + command log, e.g. "Merge feature-x into main"
 	selectMode             bool   // mouse capture dropped so the terminal can select text (mirrors lazyp4)
 	showHelp               bool   // "?" keybindings popup (see modal.go), mirrors lazyp4's own help overlay
 	helpRows               []helpRow

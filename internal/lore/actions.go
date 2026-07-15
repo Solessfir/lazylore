@@ -232,3 +232,11 @@ func SwitchBranch(r Runner, name string) (Result, error) {
 func CreateBranch(r Runner, name string) (Result, error) {
 	return runChecked(r, "branch", "create", name)
 }
+
+// MergeBranch merges name into the current branch, auto-committing when
+// clean. lore has no resolve/abort UI in lazylore for a conflicting merge -
+// same limitation as RevertRevision - so a conflict just surfaces as a
+// runChecked error here.
+func MergeBranch(r Runner, name string) (Result, error) {
+	return runChecked(r, "branch", "merge", name)
+}
