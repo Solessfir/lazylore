@@ -2,57 +2,10 @@ package ui
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
-
-// lastDebugDumpMain dedupes consecutive identical dumps in debugDumpLayout
-// (TEMPORARY, see its doc comment) so re-rendering the same unchanged
-// frame doesn't spam the debug file.
-var lastDebugDumpMain string
-
-// debugDumpLayout is TEMPORARY - appends full diagnostics to
-// <repoRoot>\lazylore-debug.txt, to keep chasing reported layout bugs.
-// Remove once the user confirms the current one is fixed.
-//
-// force=false (called from View() every render): only dumps when the final
-// joined frame (exactly what's about to be printed) has a line wider than
-// the terminal itself, deduped against the last dump so an unchanged frame
-// doesn't spam the file.
-//
-// force=true (ctrl+g, see keys.go): dumps unconditionally, for manually
-// capturing a garbled/blank screen on demand regardless of whether
-// lipgloss's own width math agrees anything's wrong.
-func debugDumpLayout(m Model, main string, force bool) {
-	lines := strings.Split(main, "\n")
-	if !force {
-		overflow := false
-		for _, l := range lines {
-			if lipgloss.Width(l) > m.width {
-				overflow = true
-				break
-			}
-		}
-		if !overflow || main == lastDebugDumpMain {
-			return
-		}
-		lastDebugDumpMain = main
-	}
-
-	f, err := os.OpenFile(filepath.Join(m.repoRoot, "lazylore-debug.txt"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "--- force=%v term_width=%d diffTotalLines=%d currentDiffPath=%q focus=%v ---\n",
-		force, m.width, m.diff.totalLines, m.currentDiffPath, m.focus)
-	for i, l := range lines {
-		fmt.Fprintf(f, "line%02d width=%d raw=%q\n", i, lipgloss.Width(l), l)
-	}
-}
 
 // Colors match lazygit's actual default theme (pkg/config/user_config.go):
 // ActiveBorderColor "green bold", InactiveBorderColor "default",
@@ -329,7 +282,6 @@ func (m Model) View() string {
 		right = lipgloss.JoinVertical(lipgloss.Left, diffPanel, logPanel)
 	}
 	main := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	debugDumpLayout(m, main, false)
 
 	keybindBarText := truncateKeybindBar(keybindBarFor(m.focus), m.width-2) // -2 padding, matches lazygit's own margin
 	keybindText := keybindBarText
