@@ -248,7 +248,7 @@ func (m Model) View() string {
 				// renderListWindow doesn't account for it (see its doc comment).
 				v = strings.TrimLeft(m.files.View(), "\n\r")
 			default:
-				v = renderListWindow(m.files, fileDelegate{focused: m.focus == focusFiles}, effFilesH)
+				v = renderListWindow(m.files, fileDelegate{focused: m.focus == focusFiles}, effFilesH, m.filesScrollOverride)
 			}
 			p := renderTitledPanel(m.focus == focusFiles, m.panelWidth, effFilesH, "2", "Files", v)
 			if m.filesTotal > 0 {
@@ -264,7 +264,7 @@ func (m Model) View() string {
 			case m.branches.SettingFilter():
 				v = strings.TrimLeft(m.branches.View(), "\n\r")
 			default:
-				v = renderListWindow(m.branches, compactTitleDelegate{focused: m.focus == focusBranches, width: m.panelWidth}, effBranchesH)
+				v = renderListWindow(m.branches, compactTitleDelegate{focused: m.focus == focusBranches, width: m.panelWidth}, effBranchesH, m.branchesScrollOverride)
 			}
 			p := renderDualTitledPanel(m.focus == focusBranches, m.panelWidth, effBranchesH, "3", "Local branches", "Remotes", !m.showRemoteBranches, v)
 			if m.branchesTotal > 0 {
@@ -280,7 +280,7 @@ func (m Model) View() string {
 			case m.history.SettingFilter():
 				v = strings.TrimLeft(m.history.View(), "\n\r")
 			default:
-				v = renderListWindow(m.history, compactTitleDelegate{focused: m.focus == focusHistory, width: m.panelWidth}, effHistoryH)
+				v = renderListWindow(m.history, compactTitleDelegate{focused: m.focus == focusHistory, width: m.panelWidth}, effHistoryH, m.historyScrollOverride)
 			}
 			p := renderTitledPanel(m.focus == focusHistory, m.panelWidth, effHistoryH, "4", "History", v)
 			if m.historyTotal > 0 {

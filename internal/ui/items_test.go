@@ -49,7 +49,7 @@ func TestRenderListWindow_NeverLeavesABlankRowMidList(t *testing.T) {
 	l.SetShowPagination(false)
 	l.Select(8) // deep enough that a page-based list would be on its first (short) page boundary
 
-	out := renderListWindow(l, fileDelegate{focused: false}, 10)
+	out := renderListWindow(l, fileDelegate{focused: false}, 10, -1)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 10 {
 		t.Fatalf("got %d lines, want exactly 10 (the window height, one real item per row, no filler)", len(lines))

@@ -90,6 +90,18 @@ type Model struct {
 	branchesHeight int
 	historyHeight  int
 	diffHeight     int
+
+	// *ScrollOverride is the Files/Branches/History scroll window's top row,
+	// set by mouse-wheel scrolling (see handleMouseWheel) so the view can
+	// pan independently of the selected row - matching lazygit, where the
+	// wheel moves what's visible without moving the cursor. -1 means no
+	// override: the window just follows the cursor (scrollWindowStart).
+	// Cleared back to -1 by any keyboard/click cursor movement, so the view
+	// snaps back to following the selection the moment the user interacts
+	// with it that way again.
+	filesScrollOverride    int
+	branchesScrollOverride int
+	historyScrollOverride  int
 }
 
 // Colors match lazygit's actual default theme (pkg/config/user_config.go):
@@ -178,22 +190,158 @@ func (m *Model) syncFocusDelegates() {
 // panel's content area) to the absolute item index it corresponds to, or
 // ok=false if relY falls below the last real row on screen.
 //
-// cursor/total/perPage must match what renderListWindow (see items.go) was
-// just called with, so the two can never disagree about what's on screen -
-// scrollWindowStart is the single source of truth both derive from, rather
-// than each independently computing (or, as before this switched away from
-// bubbles/list.Model's own pagination, reading) a page boundary that could
-// drift out of sync between the render and the click.
-func rowClickTarget(cursor, total, perPage int, relY int) (int, bool) {
+// cursor/total/perPage/scrollOverride must match what renderListWindow (see
+// items.go) was just called with, so the two can never disagree about
+// what's on screen - effectiveScrollStart is the single source of truth
+// both derive from, rather than each independently computing (or, as
+// before this switched away from bubbles/list.Model's own pagination,
+// reading) a page boundary that could drift out of sync between the
+// render and the click.
+func rowClickTarget(cursor, total, perPage, scrollOverride, relY int) (int, bool) {
 	if perPage < 1 {
 		perPage = 1
 	}
-	start := scrollWindowStart(cursor, total, perPage)
+	start := effectiveScrollStart(scrollOverride, cursor, total, perPage)
 	itemsOnScreen := min(perPage, total-start)
 	if relY < 0 || relY >= itemsOnScreen {
 		return 0, false
 	}
 	return start + relY, true
+}
+
+// mouseLayout is the pixel geometry of every hit-testable panel for the
+// current frame, shared by handleMouseClick and handleMouseWheel so they
+// can never disagree about where a panel actually is on screen.
+type mouseLayout struct {
+	effFilesH, effBranchesH, effHistoryH, effDiffH int
+	leftW                                          int
+	statusH, filesH, branchesH, historyH, diffH    int
+	mainH                                          int
+	filesBoxTop, branchesBoxTop, historyBoxTop     int
+	diffBoxLeft, diffBoxTop, diffAreaEnd           int
+}
+
+// computeMouseLayout mirrors View()'s own panel sizing (distributeSpace over
+// the footer-shrink-adjusted "extra" area) so hit-testing matches what's
+// actually on screen this frame - see resize()/View() for the canonical
+// layout this is kept in sync with.
+func (m Model) computeMouseLayout() mouseLayout {
+	footerStr := m.currentFooter()
+	footerLineCount := 0
+	if footerStr != "" {
+		footerLineCount = strings.Count(footerStr, "\n") + 1
+	}
+	actualBottom := footerLineCount + 1
+	reservedBottom := footerHeight + keybindBarHeight
+	extra := reservedBottom - actualBottom
+	if extra < 0 {
+		extra = 0
+	}
+
+	bodyHeight := max(0, m.height-footerHeight-keybindBarHeight)
+
+	mainAvail := bodyHeight + extra
+	leftOuters := distributeSpace([]layoutBox{
+		{Size: statusPanelHeight},
+		{Weight: 1},
+		{Weight: 1},
+		{Weight: 1},
+	}, mainAvail)
+
+	var l mouseLayout
+	l.effFilesH = max(0, leftOuters[1]-borderHeight)
+	l.effBranchesH = max(0, leftOuters[2]-borderHeight)
+	l.effHistoryH = max(0, leftOuters[3]-borderHeight)
+	l.effDiffH = m.diffHeight + extra
+
+	l.leftW = m.panelWidth + borderWidth
+	l.statusH = statusPanelHeight
+	l.filesH = l.effFilesH + borderHeight
+	l.branchesH = l.effBranchesH + borderHeight
+	l.historyH = l.effHistoryH + borderHeight
+	l.diffH = l.effDiffH + borderHeight
+	l.mainH = l.statusH + l.filesH + l.branchesH + l.historyH
+
+	l.filesBoxTop = l.statusH
+	l.branchesBoxTop = l.filesBoxTop + l.filesH
+	l.historyBoxTop = l.branchesBoxTop + l.branchesH
+
+	l.diffBoxLeft = l.leftW
+	l.diffBoxTop = 0
+	l.diffAreaEnd = l.diffBoxTop + l.diffH
+	return l
+}
+
+// handleMouseWheel pans whichever panel the mouse is hovering over -
+// Files/Branches/History move their scroll window (the *ScrollOverride
+// fields) without touching the selected row, Diff forwards to its own
+// viewport - without requiring a click first or changing focus, matching
+// lazygit's hover-to-scroll behavior (the wheel moves what's visible, not
+// the cursor). A list only scrolls when it actually has more items than
+// fit on screen ("room to scroll"); otherwise the wheel event is simply a
+// no-op there.
+func (m Model) handleMouseWheel(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+		return m, nil
+	}
+	if m.prompt != promptNone {
+		return m, nil
+	}
+
+	l := m.computeMouseLayout()
+	x, y := msg.X, msg.Y
+	if y >= l.mainH && x < l.leftW {
+		return m, nil // footer / keybind area
+	}
+
+	delta := 1
+	if msg.Button == tea.MouseButtonWheelUp {
+		delta = -1
+	}
+
+	panList := func(lst list.Model, height int, override *int) {
+		total := len(lst.VisibleItems())
+		if total <= height {
+			return // nothing to scroll
+		}
+		start := effectiveScrollStart(*override, lst.Index(), total, height)
+		start += delta
+		if start < 0 {
+			start = 0
+		}
+		if max := total - height; start > max {
+			start = max
+		}
+		*override = start
+	}
+
+	if x < l.leftW {
+		switch {
+		case y < l.filesBoxTop:
+			// Status area has nothing to scroll.
+		case y < l.branchesBoxTop:
+			panList(m.files, l.effFilesH, &m.filesScrollOverride)
+		case y < l.historyBoxTop:
+			panList(m.branches, l.effBranchesH, &m.branchesScrollOverride)
+		default:
+			panList(m.history, l.effHistoryH, &m.historyScrollOverride)
+		}
+		return m, nil
+	}
+
+	// Right side: only the Diff viewport actually scrolls (Command Log has
+	// no independent scroll position yet - see handleMouseClick's own note).
+	if y >= l.diffBoxTop+1 && y < l.diffAreaEnd-1 {
+		relY := y - (l.diffBoxTop + 1)
+		relX := x - (l.diffBoxLeft + 1)
+		if relY >= 0 && relY < l.effDiffH {
+			mm := tea.MouseMsg{X: relX, Y: relY, Button: msg.Button, Action: msg.Action}
+			var cmd tea.Cmd
+			m.diff.vp, cmd = m.diff.vp.Update(mm)
+			return m, cmd
+		}
+	}
+	return m, nil
 }
 
 // handleMouseClick handles left-clicks to focus panels and select items inside
@@ -209,34 +357,9 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	l := m.computeMouseLayout()
 	x, y := msg.X, msg.Y
-
-	footerStr := m.currentFooter()
-	footerLineCount := 0
-	if footerStr != "" {
-		footerLineCount = strings.Count(footerStr, "\n") + 1
-	}
-	actualBottom := footerLineCount + 1
-	reservedBottom := footerHeight + keybindBarHeight
-	extra := reservedBottom - actualBottom
-	if extra < 0 {
-		extra = 0
-	}
-
-	bodyHeight := max(0, m.height-footerHeight-keybindBarHeight)
-
-	// Use full distribute over grown main area for accurate hit rects. Matches View().
-	mainAvail := bodyHeight + extra
-	leftOuters := distributeSpace([]layoutBox{
-		{Size: statusPanelHeight},
-		{Weight: 1},
-		{Weight: 1},
-		{Weight: 1},
-	}, mainAvail)
-	effFilesH := max(0, leftOuters[1]-borderHeight)
-	effBranchesH := max(0, leftOuters[2]-borderHeight)
-	effHistoryH := max(0, leftOuters[3]-borderHeight)
-	effDiffH := m.diffHeight + extra
+	effFilesH, effBranchesH, effHistoryH, effDiffH := l.effFilesH, l.effBranchesH, l.effHistoryH, l.effDiffH
 
 	// list.Model.Select (called below) stores the target index as
 	// Page*Paginator.PerPage+cursor internally, so it needs an accurate
@@ -249,23 +372,16 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	m.branches.SetSize(m.panelWidth, effBranchesH)
 	m.history.SetSize(m.panelWidth, effHistoryH)
 
-	leftW := m.panelWidth + borderWidth
-	statusH := statusPanelHeight
-	filesH := effFilesH + borderHeight
-	branchesH := effBranchesH + borderHeight
-	historyH := effHistoryH + borderHeight
-	diffH := effDiffH + borderHeight
-	// mainH is height of full left stack (and of right column = diff + commandLogPanelHeight)
-	mainH := statusH + filesH + branchesH + historyH
+	leftW := l.leftW
+	filesH, branchesH, historyH, diffH := l.filesH, l.branchesH, l.historyH, l.diffH
+	mainH := l.mainH
 
 	if y >= mainH {
 		return m, nil // footer / keybind area
 	}
 
 	// Left column panels
-	filesBoxTop := statusH
-	branchesBoxTop := filesBoxTop + filesH
-	historyBoxTop := branchesBoxTop + branchesH
+	filesBoxTop, branchesBoxTop, historyBoxTop := l.filesBoxTop, l.branchesBoxTop, l.historyBoxTop
 
 	newFocus := m.focus
 	var cmd tea.Cmd
@@ -284,8 +400,9 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if y >= filesBoxTop+1 && y < filesBoxTop+filesH-1 {
 				relY := y - (filesBoxTop + 1)
 				if relY >= 0 && relY < effFilesH {
-					if target, ok := rowClickTarget(m.files.Index(), len(m.files.VisibleItems()), effFilesH, relY); ok {
+					if target, ok := rowClickTarget(m.files.Index(), len(m.files.VisibleItems()), effFilesH, m.filesScrollOverride, relY); ok {
 						m.files.Select(target)
+						m.filesScrollOverride = -1
 					}
 				}
 			}
@@ -306,8 +423,9 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if y >= branchesBoxTop+1 && y < branchesBoxTop+branchesH-1 {
 				relY := y - (branchesBoxTop + 1)
 				if relY >= 0 && relY < effBranchesH {
-					if target, ok := rowClickTarget(m.branches.Index(), len(m.branches.VisibleItems()), effBranchesH, relY); ok {
+					if target, ok := rowClickTarget(m.branches.Index(), len(m.branches.VisibleItems()), effBranchesH, m.branchesScrollOverride, relY); ok {
 						m.branches.Select(target)
+						m.branchesScrollOverride = -1
 					}
 				}
 			}
@@ -316,8 +434,9 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if y >= historyBoxTop+1 && y < historyBoxTop+historyH-1 {
 				relY := y - (historyBoxTop + 1)
 				if relY >= 0 && relY < effHistoryH {
-					if target, ok := rowClickTarget(m.history.Index(), len(m.history.VisibleItems()), effHistoryH, relY); ok {
+					if target, ok := rowClickTarget(m.history.Index(), len(m.history.VisibleItems()), effHistoryH, m.historyScrollOverride, relY); ok {
 						m.history.Select(target)
+						m.historyScrollOverride = -1
 					}
 				}
 			}
@@ -560,6 +679,10 @@ func NewModel(r lore.Runner, repoName, repoRoot string) Model {
 		diff:     newDiffModel(0, 0),
 		log:      newCommandLogModel(20),
 		focus:    focusFiles,
+
+		filesScrollOverride:    -1,
+		branchesScrollOverride: -1,
+		historyScrollOverride:  -1,
 	}
 
 	// Ensure no "X of Y" count text ever appears in the bottom-right of any panel
@@ -916,6 +1039,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.helpViewport, cmd = m.helpViewport.Update(msg)
 			return m, cmd
+		}
+		if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+			return m.handleMouseWheel(msg)
 		}
 		return m.handleMouseClick(msg)
 

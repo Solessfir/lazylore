@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -133,6 +134,79 @@ func TestModel_MouseClickOnStatusAreaFocusesStatus(t *testing.T) {
 	m2 := updated.(Model)
 	if m2.focus != focusStatus {
 		t.Fatalf("focus = %v, want focusStatus after clicking the Status area", m2.focus)
+	}
+}
+
+func TestModel_MouseWheelPansFilesViewWithoutMovingSelectionOrChangingFocus(t *testing.T) {
+	// Matches lazygit: the wheel moves what's visible, not the cursor -
+	// unlike keyboard/click navigation, which snaps the view back to
+	// following the selection (see updateFocusedList/handleMouseClick
+	// clearing filesScrollOverride).
+	var files []lore.FileChange
+	for i := 0; i < 30; i++ {
+		files = append(files, lore.FileChange{Status: 'M', Path: fmt.Sprintf("file%02d.txt", i)})
+	}
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.width, m.height = 100, 40
+	(&m).resize()
+	m.focus = focusBranches // hovering Files while Branches is focused
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: files}})
+	m2 := updated.(Model)
+	startIdx := m2.files.Index()
+	if m2.filesScrollOverride != -1 {
+		t.Fatalf("precondition failed: filesScrollOverride = %d, want -1 (no override yet)", m2.filesScrollOverride)
+	}
+
+	// Y=5 lands inside the Files panel content area (Status panel is 3 rows
+	// tall plus its border, Files starts right after).
+	updated, _ = m2.Update(tea.MouseMsg{X: 5, Y: 5, Button: tea.MouseButtonWheelDown})
+	m3 := updated.(Model)
+
+	if m3.focus != focusBranches {
+		t.Fatalf("focus = %v, want focusBranches unchanged - hovering to scroll shouldn't steal focus", m3.focus)
+	}
+	if m3.files.Index() != startIdx {
+		t.Fatalf("files.Index() = %d, want unchanged %d - the wheel must not move the selection", m3.files.Index(), startIdx)
+	}
+	if m3.filesScrollOverride != 1 {
+		t.Fatalf("filesScrollOverride = %d, want 1 (panned down by one row)", m3.filesScrollOverride)
+	}
+}
+
+func TestModel_MouseWheelNoOpWhenListHasNoRoomToScroll(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.width, m.height = 100, 40
+	(&m).resize()
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	m2 := updated.(Model)
+	startIdx := m2.files.Index()
+
+	updated, _ = m2.Update(tea.MouseMsg{X: 5, Y: 5, Button: tea.MouseButtonWheelDown})
+	m3 := updated.(Model)
+
+	if m3.files.Index() != startIdx {
+		t.Fatalf("files.Index() = %d, want unchanged %d - only one item, nothing to scroll", m3.files.Index(), startIdx)
+	}
+}
+
+func TestModel_MouseWheelIgnoredWhilePromptOpen(t *testing.T) {
+	var files []lore.FileChange
+	for i := 0; i < 30; i++ {
+		files = append(files, lore.FileChange{Status: 'M', Path: fmt.Sprintf("file%02d.txt", i)})
+	}
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.width, m.height = 100, 40
+	(&m).resize()
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: files}})
+	m2 := updated.(Model)
+	m2.prompt = promptConfirmDiscardAll
+	startIdx := m2.files.Index()
+
+	updated, _ = m2.Update(tea.MouseMsg{X: 5, Y: 5, Button: tea.MouseButtonWheelDown})
+	m3 := updated.(Model)
+
+	if m3.files.Index() != startIdx {
+		t.Fatalf("files.Index() = %d, want unchanged %d - a popup is covering the screen", m3.files.Index(), startIdx)
 	}
 }
 

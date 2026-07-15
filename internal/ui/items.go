@@ -72,19 +72,34 @@ func scrollWindowStart(cursor, total, height int) int {
 	return start
 }
 
+// effectiveScrollStart resolves the window's actual top row: override when
+// it's set (>= 0, meaning mouse-wheel scrolling has panned the view away
+// from the cursor - see Model's *ScrollOverride fields) and still valid for
+// the current item count, otherwise the cursor-follow window
+// (scrollWindowStart). Shared by renderListWindow and rowClickTarget so
+// rendering and click hit-testing can never disagree about what's on screen.
+func effectiveScrollStart(override, cursor, total, height int) int {
+	if height <= 0 || total <= height {
+		return 0
+	}
+	if override >= 0 && override <= total-height {
+		return override
+	}
+	return scrollWindowStart(cursor, total, height)
+}
+
 // renderListWindow renders m's visible items through delegate in a
-// continuous scroll window (see scrollWindowStart) instead of calling
+// continuous scroll window (see effectiveScrollStart) instead of calling
 // list.Model's own View(), which would page in fixed jumps. Only valid
 // while m isn't actively showing its filter-input row (SettingFilter()) -
 // that row isn't accounted for here, so callers fall back to m.View()
 // while typing a filter (see view.go).
-func renderListWindow(m list.Model, delegate list.ItemDelegate, height int) string {
+func renderListWindow(m list.Model, delegate list.ItemDelegate, height, scrollOverride int) string {
 	items := m.VisibleItems()
 	if len(items) == 0 || height <= 0 {
 		return ""
 	}
-	cur := m.Index()
-	start := scrollWindowStart(cur, len(items), height)
+	start := effectiveScrollStart(scrollOverride, m.Index(), len(items), height)
 	end := min(len(items), start+height)
 
 	var b strings.Builder

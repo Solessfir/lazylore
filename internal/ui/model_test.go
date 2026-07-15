@@ -252,7 +252,7 @@ func TestModel_EnsureMainContent_RootRevisionSkipsDiffCall(t *testing.T) {
 }
 
 func TestRowClickTarget_RealItemInWindow(t *testing.T) {
-	target, ok := rowClickTarget(0, 10, 8, 2)
+	target, ok := rowClickTarget(0, 10, 8, -1, 2)
 	if !ok || target != 2 {
 		t.Fatalf("target=%d ok=%v, want 2,true", target, ok)
 	}
@@ -263,14 +263,14 @@ func TestRowClickTarget_RejectsRowBelowLastItemInWindow(t *testing.T) {
 	// past the window (blank/nonexistent), not item 8 - unlike bubbles' own
 	// page-based Paginator, there's no "next page" for a click to wrongly
 	// resolve into here.
-	_, ok := rowClickTarget(0, 10, 8, 8)
+	_, ok := rowClickTarget(0, 10, 8, -1, 8)
 	if ok {
 		t.Fatal("expected relY=8 (past the window) to be rejected")
 	}
 }
 
 func TestRowClickTarget_RejectsRowPastLastRealItemOnShortList(t *testing.T) {
-	_, ok := rowClickTarget(0, 3, 8, 3)
+	_, ok := rowClickTarget(0, 3, 8, -1, 3)
 	if ok {
 		t.Fatal("expected relY=3 (past the 3 real items) to be rejected")
 	}
@@ -280,14 +280,14 @@ func TestRowClickTarget_ScrolledWindowOffsetsCorrectly(t *testing.T) {
 	// cursor=9 (last of 10 items) with an 8-row window scrolls so the
 	// window covers items 2-9 (scrollWindowStart(9, 10, 8) == 2); relY=7 is
 	// the last visible row, item 9.
-	target, ok := rowClickTarget(9, 10, 8, 7)
+	target, ok := rowClickTarget(9, 10, 8, -1, 7)
 	if !ok || target != 9 {
 		t.Fatalf("target=%d ok=%v, want 9,true", target, ok)
 	}
 }
 
 func TestRowClickTarget_AcceptsLastRealItemOnAnUnscrolledShortList(t *testing.T) {
-	target, ok := rowClickTarget(0, 9, 10, 8)
+	target, ok := rowClickTarget(0, 9, 10, -1, 8)
 	if !ok || target != 8 {
 		t.Fatalf("target=%d ok=%v, want 8,true (the 9th and last item, on a 10-row-tall panel)", target, ok)
 	}

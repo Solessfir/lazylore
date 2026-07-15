@@ -325,10 +325,13 @@ func (m Model) updateFocusedList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.focus {
 	case focusFiles:
 		m.files, cmd = m.files.Update(msg)
+		m.filesScrollOverride = -1 // keyboard nav always snaps the view back to following the cursor
 	case focusBranches:
 		m.branches, cmd = m.branches.Update(msg)
+		m.branchesScrollOverride = -1
 	case focusHistory:
 		m.history, cmd = m.history.Update(msg)
+		m.historyScrollOverride = -1
 	case focusDiff:
 		m.diff.vp, cmd = m.diff.vp.Update(msg)
 	}
