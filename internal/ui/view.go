@@ -192,7 +192,10 @@ func (m Model) View() string {
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		statusPanel,
 		func() string {
-			v := strings.TrimLeft(m.files.View(), "\n\r")
+			v := ""
+			if len(m.files.Items()) > 0 {
+				v = strings.TrimLeft(m.files.View(), "\n\r")
+			}
 			p := renderTitledPanel(m.focus == focusFiles, m.panelWidth, effFilesH, "2", "Files", v)
 			if m.filesTotal > 0 {
 				cur := m.files.Index() + 1
@@ -201,7 +204,10 @@ func (m Model) View() string {
 			return p
 		}(),
 		func() string {
-			v := strings.TrimLeft(m.branches.View(), "\n\r")
+			v := ""
+			if len(m.branches.Items()) > 0 {
+				v = strings.TrimLeft(m.branches.View(), "\n\r")
+			}
 			p := renderDualTitledPanel(m.focus == focusBranches, m.panelWidth, effBranchesH, "3", "Local branches", "Remotes", !m.showRemoteBranches, v)
 			if m.branchesTotal > 0 {
 				cur := m.branches.Index() + 1
@@ -210,7 +216,10 @@ func (m Model) View() string {
 			return p
 		}(),
 		func() string {
-			v := strings.TrimLeft(m.history.View(), "\n\r")
+			v := ""
+			if len(m.history.Items()) > 0 {
+				v = strings.TrimLeft(m.history.View(), "\n\r")
+			}
 			p := renderTitledPanel(m.focus == focusHistory, m.panelWidth, effHistoryH, "4", "History", v)
 			if m.historyTotal > 0 {
 				cur := m.history.Index() + 1
