@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -82,7 +83,12 @@ func (m diffModel) viewWithScrollbar() string {
 		percent = float64(m.vp.YOffset) / float64(max(1, m.totalLines-h))
 	}
 	thumbStart := int(percent * float64(h-1))
-	thumbSize := max(1, h*h/m.totalLines)
+	// Ceiling (not floor) and a 2-row floor - a 1-row thumb on a tall panel
+	// is barely visible against the track.
+	thumbSize := max(2, int(math.Ceil(float64(h*h)/float64(m.totalLines))))
+	if thumbSize > h {
+		thumbSize = h
+	}
 
 	innerW := m.vp.Width
 	// Pad-or-truncate every line to exactly innerW so the scrollbar lands
@@ -98,7 +104,7 @@ func (m diffModel) viewWithScrollbar() string {
 
 		bar := "│" // track
 		if i >= thumbStart && i < thumbStart+thumbSize {
-			bar = "█" // thumb
+			bar = "▐" // thumb - right-half block, visually thinner than a full "█"
 		}
 		result = append(result, padded+bar)
 	}

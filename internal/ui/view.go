@@ -251,6 +251,11 @@ func (m Model) View() string {
 				v = renderListWindow(m.files, fileDelegate{focused: m.focus == focusFiles}, effFilesH, m.filesScrollOverride)
 			}
 			p := renderTitledPanel(m.focus == focusFiles, m.panelWidth, effFilesH, "2", "Files", v)
+			if !m.files.SettingFilter() {
+				filesTotalItems := len(m.files.VisibleItems())
+				start := effectiveScrollStart(m.filesScrollOverride, m.files.Index(), filesTotalItems, effFilesH)
+				p = withScrollbar(p, start, filesTotalItems, effFilesH, m.focus == focusFiles)
+			}
 			if m.filesTotal > 0 {
 				cur := m.files.Index() + 1
 				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.filesTotal), m.focus == focusFiles)

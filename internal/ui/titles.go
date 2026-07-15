@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -231,5 +232,58 @@ func withBottomCount(rendered, count string, focused bool) string {
 		bottom = build(leftDashesLen)
 	}
 	lines[len(lines)-1] = bottom
+	return strings.Join(lines, "\n")
+}
+
+// withScrollbar replaces a rendered panel's right border character with a
+// thumb glyph ("▐") on whichever content rows the scroll thumb currently
+// covers - matching lazygit's own scrollbar look: the thumb merges directly
+// into the border column instead of floating in an extra column beside it.
+// Rows without a thumb keep their normal border character untouched. A
+// no-op when there's nothing to scroll (total <= height).
+func withScrollbar(rendered string, start, total, height int, focused bool) string {
+	if height <= 0 || total <= height {
+		return rendered
+	}
+	lines := strings.Split(rendered, "\n")
+	if len(lines) < height+2 { // top border + height content rows + bottom border
+		return rendered
+	}
+
+	percent := 0.0
+	if start > 0 {
+		percent = float64(start) / float64(max(1, total-height))
+	}
+	thumbStart := int(percent * float64(height-1))
+	// Ceiling (not floor) and a 2-row floor - a 1-row thumb on a tall panel
+	// (e.g. height=10, total=92) is barely visible against the track.
+	thumbSize := max(2, int(math.Ceil(float64(height*height)/float64(total))))
+	if thumbSize > height {
+		thumbSize = height
+	}
+
+	frameCol := borderUnfocused
+	if focused {
+		frameCol = borderFocused
+	}
+	frameStyle := lipgloss.NewStyle().Foreground(frameCol)
+	if focused {
+		frameStyle = frameStyle.Bold(true)
+	}
+
+	// lines[0] is the top border, lines[len-1] the bottom border - content
+	// rows are everything between, one row per index into [0, height).
+	// MaxWidth (ANSI-aware) drops exactly the trailing border cell without
+	// disturbing any color codes earlier in the line, so the thumb can take
+	// its place as a same-width, same-position replacement.
+	for row := thumbStart; row < thumbStart+thumbSize && row < height; row++ {
+		i := row + 1
+		w := lipgloss.Width(lines[i])
+		if w == 0 {
+			continue
+		}
+		trimmed := lipgloss.NewStyle().MaxWidth(w - 1).Render(lines[i])
+		lines[i] = trimmed + frameStyle.Render("▐")
+	}
 	return strings.Join(lines, "\n")
 }
