@@ -1,5 +1,8 @@
 # lazylore
 
+> [!WARNING]
+> This project was built with agentic AI coding (Claude).
+
 A terminal UI for [Lore](https://github.com/EpicGames/lore), Epic Games' open
 source version control system - the same relationship
 [lazygit](https://github.com/jesseduffield/lazygit) has to `git`.
@@ -7,9 +10,9 @@ source version control system - the same relationship
 ## Status
 
 Pre-1.0. Covers the daily-driver core loop: viewing status, staging/unstaging
-files, committing, viewing diffs, and switching/creating branches. `push`,
-`sync`, locks, layers, and everything else `lore` exposes are not wired up
-yet.
+files, discarding changes, committing, viewing diffs, switching/creating/
+resetting branches, browsing revision history, and file locking. `push`,
+`layers`, and everything else `lore` exposes are not wired up yet.
 
 ## Requirements
 
@@ -45,21 +48,56 @@ lorePath: C:\custom\path\to\lore.exe
 
 ## Keybindings
 
+Global (work regardless of which panel is focused):
+
 | Key | Action |
 |---|---|
-| `Tab` / `Shift+Tab` | cycle focused panel |
-| `↑↓` / `j` `k` | navigate the focused list |
-| `Space` | stage / unstage the selected file |
-| `c` | commit staged changes (opens a message prompt) |
-| `n` | create a new branch (opens a name prompt) |
-| `Enter` | view diff (Files panel) or switch to branch (Branches panel) |
-| `d` | reset/discard the selected file's changes |
+| `Tab` / `Shift+Tab` or `l` / `h` | cycle focused panel |
+| `1`-`5` | jump to a panel directly (Status, Files, Branches, History, Diff) |
+| `[` / `]` | cycle Branches sub-tab (Local / Remotes) |
+| `/` | filter the focused list |
+| `v` | select mode (release mouse capture to copy text with your terminal) |
+| Mouse click | focus a panel / select a row |
+| Mouse wheel | scroll whichever panel is under the cursor, without changing focus or selection |
+| `?` | full keybindings help |
 | `q` / `Ctrl+C` | quit |
+
+Files panel:
+
+| Key | Action |
+|---|---|
+| `↑↓` / `j` `k` | move selection |
+| `Space` | stage / unstage the selected file, or a whole folder recursively |
+| `a` | stage / unstage everything |
+| `Enter` | expand/collapse a folder, or view the selected file's diff |
+| `c` | commit staged changes (opens a message prompt) |
+| `e` | edit the file in `$VISUAL`/`$EDITOR` |
+| `d` | discard menu (`x` discard all, `u` discard unstaged - folders with a mix of staged/unstaged files only) |
+| `D` | discard ALL changes in the working tree |
+| `L` | toggle a file lock |
+
+Branches panel:
+
+| Key | Action |
+|---|---|
+| `Space` | checkout the selected branch |
+| `n` | create a new branch (opens a name prompt) |
+| `g` | reset the current branch to the selected branch |
+
+History panel:
+
+| Key | Action |
+|---|---|
+| `Space` | checkout the selected revision |
+| `d` | drop (revert) the selected revision |
+| `g` | reset the current branch to the selected revision |
 
 ## Development
 
 ```bash
-just build   # go build -> bin/lazylore.exe
-just run     # build and run
-just test    # go test ./...
+go build -o bin/lazylore.exe ./cmd/lazylore   # build
+go run ./cmd/lazylore                         # build and run
+go test ./...                                 # run the test suite
+go vet ./...                                  # static checks
+gofmt -l .                                    # list any unformatted files (gofmt -w . to fix)
 ```
