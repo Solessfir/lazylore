@@ -56,6 +56,7 @@ type repositoryStatusRevisionData struct {
 type repositoryStatusFileData struct {
 	Path       string `json:"path"`
 	Action     string `json:"action"`
+	Type       string `json:"type"` // "directory", "file", or "link" (LoreNodeType, lore-revision/src/interface.rs)
 	FlagStaged bool   `json:"flagStaged"`
 	FlagDirty  bool   `json:"flagDirty"`
 }
@@ -100,6 +101,17 @@ func ParseStatus(output string) (Status, error) {
 			var data repositoryStatusFileData
 			if err := json.Unmarshal(e.Data, &data); err != nil {
 				return Status{}, fmt.Errorf("parsing repositoryStatusFile event: %w", err)
+			}
+			if data.Type == "directory" {
+				// lore reports directory-level changes (e.g. an added/moved
+				// folder) as their own status entries alongside the file
+				// entries for what's inside them. lazylore's Files tree is
+				// built purely from file paths (buildFileTree synthesizes
+				// directory rows from them) - keeping a directory-type entry
+				// here would insert it as a phantom leaf "file" with the same
+				// name as the real (synthesized) directory row, e.g. a stray
+				// "SonarV2" file next to the actual "SonarV2/" folder.
+				continue
 			}
 			change := FileChange{Status: fileActionDisplayByte(data.Action, data.FlagDirty), Path: data.Path}
 			if data.FlagStaged {

@@ -57,6 +57,8 @@ type Model struct {
 	prompt                 promptKind
 	input                  textinput.Model
 	pendingDiscardPath     string
+	pendingDiscardIsDir    bool           // true when `d` was pressed on a directory row
+	pendingDiscardDirMixed bool           // only meaningful when pendingDiscardIsDir: true when the directory has both staged and unstaged files under it - the only case "discard unstaged" means anything (see discardUnstagedInDirCmd: lore staging is all-or-nothing per file, so a single file is never "mixed")
 	pendingResetRevision   string         // revision `g` (branch reset) will target once confirmed
 	pendingResetLabel      string         // human phrase for the confirm popup + command log, e.g. "Reset current branch to main"
 	pendingRevertMessage   string         // auto-commit message `d` (Drop/revert) will pass to lore, e.g. `Revert "oops"`
@@ -460,14 +462,19 @@ func (m *Model) setFileLockedByPath(path string, locked bool) tea.Cmd {
 	return cmd
 }
 
-// dirPrefixMatches reports whether filePath sits under dirPath: an exact
-// match, or nested inside it. dirPath == "" matches every path - the root
-// "/" row covers the whole tree.
+// dirPrefixMatches reports whether filePath sits under dirPath (strictly
+// nested inside it, never merely equal to it). dirPath == "" matches every
+// path - the root "/" row covers the whole tree. Deliberately not an
+// equality match too: a UE-style project can have a plain file and a
+// directory sharing the exact same repo path segment (e.g. a file named
+// "SonarV2" alongside a "SonarV2/" folder full of related assets) - treating
+// filePath == dirPath as "inside" would wrongly sweep that unrelated
+// namesake file into a folder-scoped stage/unstage/discard.
 func dirPrefixMatches(dirPath, filePath string) bool {
 	if dirPath == "" {
 		return true
 	}
-	return filePath == dirPath || strings.HasPrefix(filePath, dirPath+"/")
+	return strings.HasPrefix(filePath, dirPath+"/")
 }
 
 // dirStageCounts reports whether any file under dirPath is currently
@@ -1062,6 +1069,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.confirm(&m)
 		}
 		m.log.AppendAction(msg.label, msg.commands, nil)
+		if len(m.pendingFileOps) > 0 {
+			// Another file op (e.g. staging one file, then the whole folder
+			// before the first call returned) is still in flight. Refreshing
+			// now would fetch server state from before that other op has
+			// landed, overwriting its still-correct optimistic UI with stale
+			// data - a visible flicker back to the pre-optimistic state until
+			// the next refresh corrects it again. Skip it here; whichever op
+			// finishes last (when pendingFileOps is finally empty) triggers
+			// the one refresh that reflects everything.
+			return m, nil
+		}
 		return m, refreshCmd(m.runner)
 
 	case editorDoneMsg:

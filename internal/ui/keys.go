@@ -24,8 +24,8 @@ const (
 	promptNone promptKind = iota
 	promptCommit
 	promptNewBranch
-	promptConfirmDiscard
 	promptConfirmDiscardAll
+	promptDiscardMenu
 	promptConfirmBranchReset
 	promptConfirmRevert
 	promptConfirmForceUnlock
@@ -181,9 +181,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		switch m.focus {
 		case focusFiles:
-			if item, ok := m.files.SelectedItem().(fileItem); ok && !item.isDir {
-				m.prompt = promptConfirmDiscard
-				m.pendingDiscardPath = item.change.Path
+			// Matches lazygit's Universal.Remove ("d"): same menu for a file
+			// or a directory row (files_controller.go's remove/withItems
+			// applies uniformly to both), not a separate key for folders.
+			if item, ok := m.files.SelectedItem().(fileItem); ok {
+				lorePath := item.path
+				if lorePath == "" {
+					lorePath = "." // synthetic "/" root row - see toggleDirStage
+				}
+				m.prompt = promptDiscardMenu
+				m.pendingDiscardPath = lorePath
+				m.pendingDiscardIsDir = item.isDir
+				m.pendingDiscardDirMixed = false
+				if item.isDir {
+					hasUnstaged, hasStaged := m.dirStageCounts(item.path)
+					m.pendingDiscardDirMixed = hasUnstaged && hasStaged
+				}
 			}
 		case focusHistory:
 			// Drop: lore has no rebase/history-rewrite, so this reverts
@@ -319,15 +332,47 @@ func (m Model) updateFocusedList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.prompt == promptConfirmDiscard {
-		m.prompt = promptNone
+	if m.prompt == promptDiscardMenu {
 		path := m.pendingDiscardPath
-		m.pendingDiscardPath = ""
-		if msg.String() == "y" {
+		isDir := m.pendingDiscardIsDir
+		mixed := m.pendingDiscardDirMixed
+		switch msg.String() {
+		case "x":
+			m.prompt = promptNone
+			m.pendingDiscardPath = ""
+			m.pendingDiscardIsDir = false
+			m.pendingDiscardDirMixed = false
 			return m, tea.Batch(
 				func() tea.Msg { return setAppStatusMsg("Discarding...") },
-				resetCmd(m.runner, path),
+				discardAllCmd(m.runner, []string{path}),
 			)
+		case "u":
+			if !isDir || !mixed {
+				return m, nil // disabled - see renderPromptModal's tooltip
+			}
+			dirPath := path
+			if dirPath == "." {
+				dirPath = ""
+			}
+			var unstagedPaths []string
+			for _, fc := range m.status.Unstaged {
+				if dirPrefixMatches(dirPath, fc.Path) {
+					unstagedPaths = append(unstagedPaths, fc.Path)
+				}
+			}
+			m.prompt = promptNone
+			m.pendingDiscardPath = ""
+			m.pendingDiscardIsDir = false
+			m.pendingDiscardDirMixed = false
+			return m, tea.Batch(
+				func() tea.Msg { return setAppStatusMsg("Discarding unstaged changes...") },
+				discardUnstagedInDirCmd(m.runner, unstagedPaths),
+			)
+		case "esc", "n":
+			m.prompt = promptNone
+			m.pendingDiscardPath = ""
+			m.pendingDiscardIsDir = false
+			m.pendingDiscardDirMixed = false
 		}
 		return m, nil
 	}

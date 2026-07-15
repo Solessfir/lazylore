@@ -894,10 +894,10 @@ func TestHandleKey_FilterModeBypassesGlobalShortcuts(t *testing.T) {
 	}
 }
 
-func TestModel_DKeyOnFileOpensDiscardConfirmPrompt(t *testing.T) {
+func TestModel_DKeyOnFileOpensDiscardMenuPrompt(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
-		"--json reset a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json unstage a.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -905,8 +905,8 @@ func TestModel_DKeyOnFileOpensDiscardConfirmPrompt(t *testing.T) {
 
 	updated, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m3 := updated.(Model)
-	if m3.prompt != promptConfirmDiscard {
-		t.Fatalf("prompt = %v, want promptConfirmDiscard", m3.prompt)
+	if m3.prompt != promptDiscardMenu {
+		t.Fatalf("prompt = %v, want promptDiscardMenu", m3.prompt)
 	}
 	if m3.pendingDiscardPath != "a.txt" {
 		t.Fatalf("pendingDiscardPath = %q, want %q", m3.pendingDiscardPath, "a.txt")
@@ -919,10 +919,10 @@ func TestModel_DKeyOnFileOpensDiscardConfirmPrompt(t *testing.T) {
 	}
 }
 
-func TestModel_YKeyConfirmsDiscardAndUnstagesThenResets(t *testing.T) {
+func TestModel_XKeyConfirmsDiscardAllAndUnstagesThenResetsPurge(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
-		"--json reset a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json unstage a.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -930,13 +930,13 @@ func TestModel_YKeyConfirmsDiscardAndUnstagesThenResets(t *testing.T) {
 	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m3 := updated.(Model)
 
-	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	m4 := updated.(Model)
 	if m4.prompt != promptNone {
-		t.Fatalf("prompt after y = %v, want promptNone", m4.prompt)
+		t.Fatalf("prompt after x = %v, want promptNone", m4.prompt)
 	}
 	if m4.pendingDiscardPath != "" {
-		t.Fatalf("pendingDiscardPath after y = %q, want empty", m4.pendingDiscardPath)
+		t.Fatalf("pendingDiscardPath after x = %q, want empty", m4.pendingDiscardPath)
 	}
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd after confirming discard")
@@ -961,14 +961,14 @@ func TestModel_YKeyConfirmsDiscardAndUnstagesThenResets(t *testing.T) {
 		t.Fatalf("unexpected error: %v", am.err)
 	}
 	if len(fake.Calls) != 2 || fake.Calls[0][1] != "unstage" || fake.Calls[1][1] != "reset" {
-		t.Fatalf("Calls = %+v, want unstage then reset (via lore.DiscardChanges)", fake.Calls)
+		t.Fatalf("Calls = %+v, want unstage then reset --purge (via lore.DiscardAllChanges)", fake.Calls)
 	}
 }
 
 func TestModel_EscCancelsDiscardPromptWithoutRunnerCalls(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
-		"--json reset a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json unstage a.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -1082,7 +1082,12 @@ func TestModel_SpaceOnDirectoryStagesEverythingUnderItRecursively(t *testing.T) 
 	}
 }
 
-func TestModel_DKeyOnDirectoryDoesNothing(t *testing.T) {
+func TestModel_DKeyOnDirectoryOpensDiscardMenuWithUnstagedDisabledWhenNotMixed(t *testing.T) {
+	// Matches lazygit's Universal.Remove: "d" opens the same discard menu
+	// for a directory as for a file (files_controller.go's remove() takes
+	// selectedNodes, not a single file). "u" stays disabled here since
+	// every file under "src" is unstaged - nothing staged to preserve, so
+	// "discard unstaged" and "discard all" would do the exact same thing.
 	fake := &lore.FakeRunner{}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})
@@ -1091,8 +1096,97 @@ func TestModel_DKeyOnDirectoryDoesNothing(t *testing.T) {
 	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m3 := updated.(Model)
 
-	if m3.prompt != promptNone {
-		t.Fatalf("'d' on a directory should not open the discard prompt, got prompt = %v", m3.prompt)
+	if m3.prompt != promptDiscardMenu {
+		t.Fatalf("'d' on a directory should open the discard menu, got prompt = %v", m3.prompt)
+	}
+	if !m3.pendingDiscardIsDir {
+		t.Fatal("expected pendingDiscardIsDir = true for a directory row")
+	}
+	if m3.pendingDiscardPath != "src" {
+		t.Fatalf("pendingDiscardPath = %q, want %q", m3.pendingDiscardPath, "src")
+	}
+
+	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	m4 := updated.(Model)
+	if m4.prompt != promptDiscardMenu {
+		t.Fatal("'u' on a directory row should be a no-op (disabled), not dismiss the menu")
+	}
+	if cmd != nil {
+		t.Fatal("'u' on a directory row should not dispatch a Cmd (disabled)")
+	}
+}
+
+func TestModel_UKeyOnMixedDirectoryDiscardsOnlyUnstagedFiles(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json unstage src/b.go":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge src/b.go": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{
+		Staged:   []lore.FileChange{{Status: 'M', Path: "src/a.go"}},
+		Unstaged: []lore.FileChange{{Status: 'M', Path: "src/b.go"}},
+	}})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m3 := updated.(Model)
+	if !m3.pendingDiscardDirMixed {
+		t.Fatal("expected pendingDiscardDirMixed = true for a directory with both staged and unstaged files")
+	}
+
+	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	m4 := updated.(Model)
+	if m4.prompt != promptNone {
+		t.Fatalf("prompt after u = %v, want promptNone", m4.prompt)
+	}
+	if cmd == nil {
+		t.Fatal("expected a non-nil Cmd after 'u' on a mixed directory")
+	}
+	runBatch(cmd)
+	if len(fake.Calls) != 2 || fake.Calls[0][1] != "unstage" || fake.Calls[0][2] != "src/b.go" {
+		t.Fatalf("Calls = %+v, want unstage+reset --purge for src/b.go only (src/a.go stays staged)", fake.Calls)
+	}
+}
+
+func TestModel_SpaceOnDirectorySparesNamesakeSiblingFile(t *testing.T) {
+	// A UE-style project can have a plain file and a directory sharing the
+	// exact same path segment (e.g. "SonarV2" the file, "SonarV2/" the
+	// folder, both siblings under the same parent). Space on the directory
+	// row must only stage files strictly nested inside it, not the
+	// unrelated namesake file that merely shares its path string
+	// (dirPrefixMatches used to treat filePath == dirPath as "inside").
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json stage SonarV2": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{
+		{Status: 'A', Path: "SonarV2"},                      // the namesake file
+		{Status: 'A', Path: "SonarV2/BP_DummySonar.uasset"}, // inside the directory
+	}}})
+	m2 := updated.(Model)
+
+	// Move the cursor onto the directory row (not the namesake leaf).
+	var dirIdx int
+	for i, it := range m2.files.Items() {
+		fi := it.(fileItem)
+		if fi.isDir && fi.path == "SonarV2" {
+			dirIdx = i
+		}
+	}
+	m2.files.Select(dirIdx)
+
+	updated, cmd := m2.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m3 := updated.(Model)
+	runBatch(cmd)
+
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage SonarV2" {
+		t.Fatalf("Calls = %+v, want a single 'stage SonarV2' (directory) call", fake.Calls)
+	}
+	for _, it := range m3.files.Items() {
+		fi := it.(fileItem)
+		if !fi.isDir && fi.path == "SonarV2" && fi.staged {
+			t.Fatal("the namesake leaf file 'SonarV2' must not be optimistically staged by staging the directory")
+		}
 	}
 }
 

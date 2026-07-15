@@ -155,6 +155,29 @@ func TestParseStatus_Untracked(t *testing.T) {
 	}
 }
 
+// Captured verbatim from `lore.exe --json status --scan` on a repo where a
+// directory node itself changed (e.g. an added folder), reported as its own
+// entry ("type":"directory") alongside the file entries for what's inside
+// it - includes a namesake collision (a file and a directory both named
+// "SonarV2" under the same parent) to match the real-world repro.
+const statusDirectoryEntryOutput = `{"tagName":"repositoryStatusRevision","data":{"repository":"019f46fd1f7b7880a88e902a7b44074a","branch":"019f46fd51147821aed79f28a839f591","branchName":"my-first-branch","revision":"45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2","revisionNumber":2,"revisionStaged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMerged":"0000000000000000000000000000000000000000000000000000000000000000","revisionMergedParentBranch":"0000000000000000000000000000000000000000000000000000000000000000","revisionLocal":"45593a0083a67a79602235b4d6c39d9d2dc1fc89375543a1bd6bd43288fa60a2","revisionLocalNumber":2,"revisionRemote":"0000000000000000000000000000000000000000000000000000000000000000","revisionRemoteNumber":0,"isLocalAhead":0,"isRemoteAhead":0,"remoteAvailable":1,"remoteAuthorized":1,"remoteBranchExist":0}}
+{"tagName":"repositoryStatusFile","data":{"path":"SonarV2","size":0,"action":"add","type":"directory","flagStaged":false,"flagMerged":false,"flagConflict":false,"flagConflictUnresolved":false,"flagConflictAutomerged":false,"flagConflictMine":false,"flagConflictTheirs":false,"flagDirty":true,"fromPath":""}}
+{"tagName":"repositoryStatusFile","data":{"path":"SonarV2/BP_DummySonar.uasset","size":128,"action":"add","type":"file","flagStaged":false,"flagMerged":false,"flagConflict":false,"flagConflictUnresolved":false,"flagConflictAutomerged":false,"flagConflictMine":false,"flagConflictTheirs":false,"flagDirty":true,"fromPath":""}}
+{"tagName":"repositoryStatusSummary","data":{"adds":2,"deletes":0,"modifies":0,"moves":0,"copies":0}}
+{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
+`
+
+func TestParseStatus_SkipsDirectoryTypeEntries(t *testing.T) {
+	s, err := lore.ParseStatus(statusDirectoryEntryOutput)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := lore.FileChange{Status: 'A', Path: "SonarV2/BP_DummySonar.uasset"}
+	if len(s.Unstaged) != 1 || s.Unstaged[0] != want {
+		t.Fatalf("Unstaged = %+v, want only the file entry [%+v] - the directory-type \"SonarV2\" entry must be skipped", s.Unstaged, want)
+	}
+}
+
 func TestParseStatus_Staged(t *testing.T) {
 	s, err := lore.ParseStatus(statusStagedOutput)
 	if err != nil {

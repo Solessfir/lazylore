@@ -25,6 +25,12 @@ type fileTreeNode struct {
 	children []*fileTreeNode
 	change   lore.FileChange
 	staged   bool
+	// allStaged is only meaningful for a directory node: true when every
+	// file anywhere in its subtree is staged (set by computeAllStaged,
+	// after the tree is fully built) - lets a directory row render green
+	// once everything under it is staged, matching lazygit's own
+	// all-staged-subtree coloring.
+	allStaged bool
 }
 
 // buildFileTree groups a Status's staged and unstaged files into a
@@ -103,7 +109,33 @@ func buildFileTree(s lore.Status) *fileTreeNode {
 	if root := hiddenTop.children[0]; root.path == "" && len(root.children) == 1 {
 		hiddenTop.children[0] = root.children[0]
 	}
+	computeAllStaged(hiddenTop)
 	return hiddenTop
+}
+
+// computeAllStaged fills in every directory node's allStaged bottom-up:
+// true only when the subtree contains at least one file and every file in
+// it is staged. Returns (allStaged, sawFile) for node itself so a parent
+// call can fold a child directory's result in without re-walking it.
+func computeAllStaged(node *fileTreeNode) (allStaged, sawFile bool) {
+	if !node.isDir {
+		return node.staged, true
+	}
+	allStaged = true
+	for _, c := range node.children {
+		childAllStaged, childSawFile := computeAllStaged(c)
+		if childSawFile {
+			sawFile = true
+			if !childAllStaged {
+				allStaged = false
+			}
+		}
+	}
+	if !sawFile {
+		allStaged = false
+	}
+	node.allStaged = allStaged
+	return allStaged, sawFile
 }
 
 func sortFileTree(node *fileTreeNode) {

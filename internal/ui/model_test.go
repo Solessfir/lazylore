@@ -588,6 +588,42 @@ func TestModel_ActionDoneMsgAppendsToCommandLogAndRefreshes(t *testing.T) {
 	}
 }
 
+func TestModel_ActionDoneMsgSkipsRefreshWhileAnotherFileOpIsPending(t *testing.T) {
+	// Regression: staging one file, then staging a whole folder before the
+	// first stage's response came back, used to cause a visible flicker -
+	// the first stage's completion refreshed status from the server before
+	// the folder-stage's own call had landed there, briefly reverting the
+	// folder-stage's optimistic all-green UI back to partially staged.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.pendingFileOps = map[string]bool{"stage:src": true} // the folder-stage is still in flight
+
+	updated, cmd := m.Update(actionDoneMsg{label: "Stage file", opKey: "stage:a.txt", commands: []string{"lore stage a.txt"}})
+	m2 := updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected no refresh Cmd while another file op is still pending")
+	}
+	if !m2.pendingFileOps["stage:src"] {
+		t.Fatal("the other still-pending op must not have been cleared")
+	}
+
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json status --scan": {ExitCode: 0, Stdout: `{"tagName":"repositoryStatusRevision","data":{"repository":"x","branchName":"main"}}
+` + jsonCompleteSuccess},
+		"--json branch list": {ExitCode: 0, Stdout: `{"tagName":"branchListEntry","data":{"location":"local","name":"main","isCurrent":true}}
+` + jsonCompleteSuccess},
+		"--json history 50": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m2.runner = fake
+	updated, cmd = m2.Update(actionDoneMsg{label: "Stage folder", opKey: "stage:src", commands: []string{"lore stage src"}})
+	m3 := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected a refresh Cmd once the last pending file op completes")
+	}
+	if len(m3.pendingFileOps) != 0 {
+		t.Fatalf("pendingFileOps = %+v, want empty", m3.pendingFileOps)
+	}
+}
+
 func TestModel_HistoryMsgUpdatesTotalEvenWhileFiltering(t *testing.T) {
 	// Regression: historyMsg used to return early (skipping historyTotal and
 	// chrome bookkeeping) whenever list.SetItems returned a non-nil cmd,

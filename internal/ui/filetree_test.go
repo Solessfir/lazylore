@@ -31,6 +31,46 @@ func TestBuildFileTree_SkipsPathsWithNoFilenameSegment(t *testing.T) {
 	}
 }
 
+func TestBuildFileTree_DirRowIsAllStagedOnlyWhenEveryDescendantFileIsStaged(t *testing.T) {
+	s := lore.Status{
+		Staged:   []lore.FileChange{{Status: 'M', Path: "src/a.go"}},
+		Unstaged: []lore.FileChange{{Status: 'M', Path: "src/b.go"}},
+	}
+	tree := buildFileTree(s)
+	rows := flattenFileTree(tree, nil)
+	var dirRow *fileTreeRow
+	for i := range rows {
+		if rows[i].node.isDir {
+			dirRow = &rows[i]
+		}
+	}
+	if dirRow == nil {
+		t.Fatal("expected a 'src' directory row")
+	}
+	if dirRow.node.allStaged {
+		t.Fatal("directory should not be allStaged while one child is still unstaged")
+	}
+
+	s2 := lore.Status{Staged: []lore.FileChange{
+		{Status: 'M', Path: "src/a.go"},
+		{Status: 'M', Path: "src/b.go"},
+	}}
+	tree2 := buildFileTree(s2)
+	rows2 := flattenFileTree(tree2, nil)
+	dirRow = nil
+	for i := range rows2 {
+		if rows2[i].node.isDir {
+			dirRow = &rows2[i]
+		}
+	}
+	if dirRow == nil {
+		t.Fatal("expected a 'src' directory row")
+	}
+	if !dirRow.node.allStaged {
+		t.Fatal("directory should be allStaged once every file under it is staged")
+	}
+}
+
 func TestBuildFileTree_SingleTopLevelFileSkipsRootRow(t *testing.T) {
 	s := lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}
 	tree := buildFileTree(s)

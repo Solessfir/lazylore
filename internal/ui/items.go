@@ -69,6 +69,7 @@ type fileItem struct {
 	depth      int
 	change     lore.FileChange
 	staged     bool
+	allStaged  bool // only meaningful when isDir - see fileTreeNode.allStaged
 	collapsed  bool // only meaningful when isDir
 	locked     bool // only meaningful for files; lore lock held by anyone
 	lockedByMe bool // only meaningful when locked is true
@@ -127,7 +128,11 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 			if fi.collapsed {
 				arrow = "▶"
 			}
-			fmt.Fprint(w, clip.Render(indent+arrow+" "+fi.label))
+			display := indent + arrow + " " + fi.label
+			if fi.allStaged {
+				display = fileNameStyle(true).Render(display)
+			}
+			fmt.Fprint(w, clip.Render(display))
 			return
 		}
 		// File, not selected: apply per-part colors (status red/green, name color for staged)
@@ -152,8 +157,12 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		if fi.collapsed {
 			arrow = "▶"
 		}
+		style := selectedRowStyle(rowWidth)
+		if fi.allStaged {
+			style = style.Foreground(fileStagedColor)
+		}
 		display := indent + arrow + " " + fi.label
-		fmt.Fprint(w, selectedRowStyle(rowWidth).Render(display))
+		fmt.Fprint(w, style.Render(display))
 		return
 	}
 
@@ -205,6 +214,7 @@ func statusToItems(s lore.Status, collapsedDirs map[string]bool, locks map[strin
 			depth:      row.depth,
 			change:     row.node.change,
 			staged:     row.node.staged,
+			allStaged:  row.node.allStaged,
 			collapsed:  collapsedDirs[row.node.path],
 			locked:     locked,
 			lockedByMe: lockedByMe,

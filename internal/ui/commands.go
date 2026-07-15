@@ -218,11 +218,20 @@ func dirUnstageCmd(r lore.Runner, dirPath, lorePath string) tea.Cmd {
 	}
 }
 
-func resetCmd(r lore.Runner, path string) tea.Cmd {
+// discardUnstagedInDirCmd discards only the given paths - the unstaged
+// files under a directory row's discard menu (see the "u" case in
+// handlePromptKey), leaving any staged files elsewhere under that directory
+// untouched. Staging in lore is all-or-nothing per file (confirmed: editing
+// an already-staged file keeps the whole file staged, it never splits into
+// a separate unstaged diff on top), so "discard unstaged" only means
+// anything at directory granularity - some files under it staged, others
+// not - never for a single file, which is why this only takes a directory's
+// pre-filtered path list rather than being a general single-path op.
+func discardUnstagedInDirCmd(r lore.Runner, paths []string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
-		_, err := lore.DiscardChanges(rr, path)
-		return actionDoneMsg{label: "Discard changes", err: err, commands: rr.commands}
+		_, err := lore.DiscardAllChanges(rr, paths)
+		return actionDoneMsg{label: "Discard unstaged changes", err: err, commands: rr.commands}
 	}
 }
 

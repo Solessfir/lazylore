@@ -40,8 +40,8 @@ func (m Model) renderPromptModal() string {
 		return renderModal("Commit", m.input.View(), "enter - commit   esc - cancel")
 	case promptNewBranch:
 		return renderModal("New Branch", m.input.View(), "enter - create   esc - cancel")
-	case promptConfirmDiscard:
-		return renderModal("Discard Changes", "Discard changes to "+m.pendingDiscardPath+"?", "y - confirm   n / esc - cancel")
+	case promptDiscardMenu:
+		return m.renderDiscardMenuModal()
 	case promptConfirmDiscardAll:
 		return renderModal("Discard All Changes", "Discard ALL changes in the working tree?", "y - confirm   n / esc - cancel")
 	case promptConfirmBranchReset:
@@ -54,6 +54,28 @@ func (m Model) renderPromptModal() string {
 	default:
 		return ""
 	}
+}
+
+// renderDiscardMenuModal renders the "d" discard menu: matches lazygit's
+// own two-option "Discard Changes" popup (files_controller.go's remove(),
+// Files.ConfirmDiscard="x"/discardUnstagedChangesItem's "u") rather than
+// lazylore's older single yes/no discard prompt. "Discard unstaged changes"
+// only means anything for a directory that has both staged and unstaged
+// files under it - lore stages a file as a whole (editing an already-staged
+// file keeps the entire file staged, never splitting into a further
+// unstaged diff on top), so a single file is never "mixed" and the option
+// stays struck through for it.
+func (m Model) renderDiscardMenuModal() string {
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Strikethrough(true)
+
+	body := "Discard all changes in " + m.pendingDiscardPath
+	unstagedLine := "u - Discard unstaged changes"
+	if !m.pendingDiscardIsDir || !m.pendingDiscardDirMixed {
+		unstagedLine = dim.Render(unstagedLine)
+	}
+
+	hint := "x - Discard all changes\n" + unstagedLine + "\nesc - cancel"
+	return renderModal("Discard Changes", body, hint)
 }
 
 // helpRow is one line of the keybindings overlay: either a section header
@@ -75,7 +97,7 @@ func (m Model) localHelpRows() []helpRow {
 			{key: "enter", desc: "Expand/collapse folder, or show the selected file's diff"},
 			{key: "c", desc: "Commit staged changes"},
 			{key: "e", desc: "Edit file in $VISUAL/$EDITOR"},
-			{key: "d", desc: "Discard changes to selected file"},
+			{key: "d", desc: "Discard changes to selected file/folder (x - all, u - unstaged only)"},
 			{key: "D", desc: "Discard ALL changes"},
 			{key: "L", desc: "Toggle file lock"},
 		}
