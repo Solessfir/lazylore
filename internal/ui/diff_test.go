@@ -47,12 +47,9 @@ func TestNewDiffModel_SetContentDoesNotPanic(t *testing.T) {
 }
 
 func TestDiffModel_ViewWithScrollbarPadsColoredLongLinesToExactWidth(t *testing.T) {
-	// Regression: viewWithScrollbar used to truncate long lines by raw rune
-	// count ([]rune(line)[:innerW]), slicing through the middle of an ANSI
-	// escape code on any colorizeDiff-styled line longer than the panel
-	// width - corrupting the terminal's color state for every row rendered
-	// after it. Reported as the whole layout's borders shifting/garbling
-	// when selecting a file with a long diff.
+	// Truncation must be ANSI-aware - a raw rune-count slice through the
+	// middle of an escape code corrupts the terminal's color state for
+	// every row rendered after it.
 	m := newDiffModel(20, 5)
 	m.vp.Width = 20
 	// More lines than the viewport height, so viewWithScrollbar actually
@@ -74,10 +71,8 @@ func TestDiffModel_ViewWithScrollbarPadsColoredLongLinesToExactWidth(t *testing.
 }
 
 func TestDiffModel_SetContentRawSkipsDiffColoring(t *testing.T) {
-	// Regression: a branch log line like "abc123 - fix bug" starts with a
-	// literal "-" character. Routed through SetContent (colorizeDiff), that
-	// would get wrongly styled as a diff deletion; SetContentRaw must leave
-	// it untouched.
+	// A branch log line like "abc123 - fix bug" starts with a literal "-" -
+	// SetContentRaw must not style it as a diff deletion.
 	m := newDiffModel(80, 24)
 	m.SetContentRaw("abc123 dev - fix bug\nmore text")
 	view := m.vp.View()

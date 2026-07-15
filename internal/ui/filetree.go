@@ -9,10 +9,8 @@ import (
 
 // fileTreeNode is one node in the directory tree built from a lore.Status's
 // changed files - either a directory (isDir, with children) or a file leaf
-// (carries the FileChange it represents). This only ever covers changed
-// paths, never the whole repository, mirroring lazygit's own Files panel
-// (pkg/gui/presentation/files.go): it's a tree of what's changed, not a
-// repo browser.
+// (carries the FileChange it represents). Only covers changed paths, never
+// the whole repository.
 //
 // path is always the node's full path from the repo root ("" only for the
 // synthetic "/" root node) - unaffected by compressFileTree below, so
@@ -26,26 +24,17 @@ type fileTreeNode struct {
 	change   lore.FileChange
 	staged   bool
 	// allStaged is only meaningful for a directory node: true when every
-	// file anywhere in its subtree is staged (set by computeAllStaged,
-	// after the tree is fully built) - lets a directory row render green
-	// once everything under it is staged, matching lazygit's own
-	// all-staged-subtree coloring.
+	// file anywhere in its subtree is staged (set by computeAllStaged),
+	// so a directory row can render green once everything under it is staged.
 	allStaged bool
 }
 
 // buildFileTree groups a Status's staged and unstaged files into a
-// directory tree, wrapped in a synthetic "/" root and compressed the way
-// lazygit's own tree does (pkg/gui/filetree/build_tree.go + node.go's
-// compressAux): a chain of directories that each have exactly one
-// subdirectory collapses into a single row (e.g. "Content/Sus/Blueprints"
-// instead of three separate rows), and the root row itself collapses away
-// the same way whenever the whole tree boils down to one top-level entry -
-// matching lazygit's own root-collapsing behavior rather than always
-// showing a "/" row that would just add noise for the common case. A path
-// that appears in both Staged and Unstaged (a file with further edits on
-// top of what's already staged) produces two separate leaf nodes under the
-// same parent, same as the flat list did - staged and unstaged are always
-// distinct rows.
+// directory tree, wrapped in a synthetic "/" root and compressed: a chain
+// of directories that each have exactly one subdirectory collapses into a
+// single row (e.g. "Content/Sus/Blueprints" instead of three separate
+// rows), and the root row itself collapses away the same way whenever the
+// whole tree boils down to one top-level entry.
 func buildFileTree(s lore.Status) *fileTreeNode {
 	displayRoot := &fileTreeNode{isDir: true} // the "/" row; path == "" marks it
 
@@ -101,11 +90,8 @@ func buildFileTree(s lore.Status) *fileTreeNode {
 	hiddenTop.children = []*fileTreeNode{displayRoot}
 	compressFileTree(hiddenTop)
 
-	// compressFileTree's chain-collapse only hoists directories (a lone
-	// file isn't a chain to collapse through), so the single-file-at-
-	// repo-root case - nothing else changed, one plain file at the top -
-	// needs its own check: still worth skipping the "/" wrapper for one
-	// file, same as it is for one directory chain.
+	// compressFileTree only hoists directory chains - a lone file at repo
+	// root needs its own check to skip the "/" wrapper too.
 	if root := hiddenTop.children[0]; root.path == "" && len(root.children) == 1 {
 		hiddenTop.children[0] = root.children[0]
 	}
@@ -149,13 +135,11 @@ func sortFileTree(node *fileTreeNode) {
 	}
 }
 
-// compressFileTree collapses directory chains the way lazygit's node.go
-// compressAux does: a directory with exactly one subdirectory is replaced
-// in-place by that subdirectory, repeating until the chain ends at either a
-// file or a directory with more than one child. Run from hiddenTop (a
-// wrapper never itself rendered - see flattenFileTree) so the synthetic "/"
-// root participates in the same rule: it collapses away too when the whole
-// tree has only one top-level directory in it.
+// compressFileTree collapses directory chains: a directory with exactly one
+// subdirectory is replaced in-place by that subdirectory, repeating until
+// the chain ends at a file or a directory with more than one child. Run
+// from hiddenTop (never itself rendered) so the synthetic "/" root
+// participates too.
 func compressFileTree(node *fileTreeNode) *fileTreeNode {
 	if !node.isDir {
 		return node
@@ -188,8 +172,7 @@ type fileTreeRow struct {
 
 // flattenFileTree walks the tree depth-first into the ordered rows a list
 // widget actually renders, skipping the children of any directory whose
-// path is in collapsed - mirrors lazygit's renderAux/CollapsedPaths. Starts
-// from hiddenTop's children rather than hiddenTop itself, so the wrapper
+// path is in collapsed. Starts from hiddenTop's children so the wrapper
 // node buildFileTree returns is never rendered as a row of its own.
 func flattenFileTree(hiddenTop *fileTreeNode, collapsed map[string]bool) []fileTreeRow {
 	var rows []fileTreeRow

@@ -194,9 +194,8 @@ func TestTruncateKeybindBar_DropsTailEntriesPastWidthWithEllipsis(t *testing.T) 
 }
 
 func TestTruncateKeybindBar_AlwaysKeepsFirstEntryEvenWhenNarrowerThanIt(t *testing.T) {
-	// Matches lazygit's own formatBindingInfos: the width check only applies
-	// from the second entry onward, so a lone entry is never itself cut
-	// short or given a pointless trailing ellipsis.
+	// The width check only applies from the second entry onward, so a lone
+	// entry is never itself cut short or given a pointless trailing ellipsis.
 	bar := "Stage: <space>"
 	got := truncateKeybindBar(bar, 3)
 	if got != bar {
@@ -205,12 +204,8 @@ func TestTruncateKeybindBar_AlwaysKeepsFirstEntryEvenWhenNarrowerThanIt(t *testi
 }
 
 func TestModel_KeybindBarIsContextualNotGlobalNavOrQuit(t *testing.T) {
-	// Regression: the bar used to be one static string always advertising
-	// Focus/Quit/Select-copy alongside file actions, unlike lazygit's own
-	// per-context bottom bar (which never advertises navigation or quit -
-	// see pkg/gui/controllers/global_controller.go's DisplayOnScreen set:
-	// only Cancel and the "?" keybindings menu, neither of which lazylore
-	// implements). Those keys still work; they're just not advertised.
+	// The bottom bar is per-context: Files' bar shows only file actions,
+	// never global nav/quit (those keys still work, just aren't advertised).
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m2 := updated.(Model)
@@ -319,8 +314,6 @@ func TestRenderTitledPanel_StatusCompact(t *testing.T) {
 }
 
 func TestModel_StatusTextShowsBranchNotDuplicatedRepoName(t *testing.T) {
-	// Regression: statusText used to render the repo name twice
-	// ("repo(repo) → branch") instead of showing the branch name.
 	m := NewModel(&lore.FakeRunner{}, "myrepo", "/repo")
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m2 := updated.(Model)

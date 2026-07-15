@@ -43,14 +43,11 @@ type diffMsg struct {
 
 // actionDoneMsg reports a background lore command's result. opKey, revert,
 // and confirm are only set by actions that flipped something in the UI
-// optimistically (see model.go's setFileStagedByPath/setFileLockedByPath)
-// before this message arrived: opKey (if non-empty) is cleared from
-// pendingFileOps regardless of outcome. On failure, revert (if non-nil)
-// undoes the optimistic flip. On success, confirm (if non-nil) updates any
-// Model-level cache the optimistic flip *didn't* touch (e.g. m.locks) -
-// without it, the refresh this triggers can rebuild the Files list from
-// that now-stale cache before its own reload catches up, causing a visible
-// flicker (see lockToggleCmd, the one action with such a cache).
+// optimistically before this message arrived: opKey (if non-empty) is
+// cleared from pendingFileOps regardless of outcome. On failure, revert (if
+// non-nil) undoes the optimistic flip. On success, confirm (if non-nil)
+// updates any Model-level cache the optimistic flip didn't touch (e.g.
+// m.locks), so a triggered refresh doesn't rebuild from a stale cache.
 type actionDoneMsg struct {
 	label    string
 	err      error

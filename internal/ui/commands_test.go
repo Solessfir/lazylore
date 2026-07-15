@@ -249,12 +249,9 @@ func TestLockToggleCmd_AcquireConfirmUsesCurrentUserIDAsOwner(t *testing.T) {
 }
 
 func TestLockToggleCmd_AcquireConfirmFallsBackToUnknownOwnerWhenUnauthenticated(t *testing.T) {
-	// Regression: with no resolvable identity (lore auth info failing, e.g.
-	// no auth endpoint configured - see project_lazylore_lock_owner_todo
-	// memory), currentUserID is "" - the optimistic lock record used to
-	// store that empty string as Owner directly, showing "Locked by " with
-	// nothing after it in the diff view instead of the real server
-	// placeholder a subsequent lock status refresh would report.
+	// With no resolvable identity, currentUserID is "" - the optimistic lock
+	// record must fall back to a placeholder owner, not store that empty
+	// string directly (which would show "Locked by " with nothing after it).
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json lock acquire hello.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}

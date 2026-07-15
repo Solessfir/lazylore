@@ -7,28 +7,24 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Colors match lazygit's actual default theme (pkg/config/user_config.go):
-// ActiveBorderColor "green bold", InactiveBorderColor "default",
-// OptionsTextColor "blue", UnstagedChangesColor "red" (reused here for
-// errors). Basic 16-color ANSI codes only (0-15) - the one palette every
-// terminal renders correctly, unlike 256-color/TrueColor codes which
-// depend on terminal capability detection going right.
+// Basic 16-color ANSI codes only (0-15) - the one palette every terminal
+// renders correctly, unlike 256-color/TrueColor codes which depend on
+// terminal capability detection going right.
 var (
 	focusedPanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("2")).
-				Padding(0) // no extra inner padding (reduces top padding vs lazygit)
+				Padding(0)
 	unfocusedPanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("7")). // white like lazygit inactive
+				BorderForeground(lipgloss.Color("7")).
 				Padding(0)
 	errorStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
 	keybindBarStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Height(1).Padding(0)
 )
 
-// bracketedKey wraps a named (non-printable) key in angle brackets, matching
-// lazygit's own key-label convention (docs/keybindings/Keybindings_en.md:
-// "<space>", "<enter>" vs bare "c", "d", "D" for literal characters).
+// bracketedKey wraps a named (non-printable) key in angle brackets:
+// "<space>", "<enter>" vs bare "c", "d", "D" for literal characters.
 func bracketedKey(k string) string {
 	switch k {
 	case "space", "enter", "esc", "tab", "shift+tab":
@@ -39,23 +35,13 @@ func bracketedKey(k string) string {
 }
 
 // keybindBarFor returns the keybinding legend for the currently focused
-// panel, pinned to the bottom of the screen. This mirrors lazygit's own
-// bottom option bar (pkg/gui/options_map.go: renderContextOptionsMap),
-// which shows only the current context's "DisplayOnScreen" bindings - not
-// a single static global list. Kept to keys handleKey/handlePromptKey
-// actually implement for that panel. "Keybindings: ?" is appended last on
-// every panel, matching lazygit's Global OptionMenu binding (ShortDescription
-// "Keybindings", always appended after context-specific ones - see
-// pkg/gui/controllers/global_controller.go) - truncateKeybindBar (below) is
-// what drops it first on a narrow terminal, same as lazygit's own ellipsis
-// truncation in formatBindingInfos.
+// panel, pinned to the bottom of the screen - only the keys handleKey/
+// handlePromptKey actually implement for that panel. "Keybindings: ?" is
+// appended last on every panel; truncateKeybindBar (below) drops it first
+// on a narrow terminal.
 func keybindBarFor(focus focusPanel) string {
 	switch focus {
 	case focusStatus:
-		// lazygit's real Status panel has its own actions (edit config,
-		// check for update, switch to a recent repo, cycle branch logs) -
-		// none of those exist in lazylore yet, so there's nothing
-		// panel-specific to show here.
 		return "Keybindings: ?"
 	case focusFiles:
 		return "Stage: " + bracketedKey("space") + " | Commit: c | Edit: e | Discard: d | Reset: D | Lock: L | Keybindings: ?"
@@ -68,10 +54,9 @@ func keybindBarFor(focus focusPanel) string {
 	}
 }
 
-// truncateKeybindBar mirrors lazygit's own formatBindingInfos
-// (pkg/gui/options_map.go): the first " | "-separated entry always shows;
-// each following entry is added only while it still fits width, and the
-// first one that doesn't gets replaced with a trailing " | …" instead of
+// truncateKeybindBar: the first " | "-separated entry always shows; each
+// following entry is added only while it still fits width, and the first
+// one that doesn't gets replaced with a trailing " | …" instead of
 // wrapping or getting cut off mid-entry.
 func truncateKeybindBar(bar string, width int) string {
 	if width <= 0 {
@@ -122,7 +107,7 @@ func renderTitledPanelForStatus(focused bool, width, height int, content string)
 // diverges both ways, "↓N" behind only, "↑N" ahead only, "" when in sync or
 // no remote comparison is available (offline, no remote, not pushed yet).
 func aheadBehindArrows(ahead, behind int) string {
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow, matches lazygit
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
 	switch {
 	case behind > 0 && ahead > 0:
 		return style.Render(fmt.Sprintf("↓%d↑%d", behind, ahead)) + " "
@@ -283,7 +268,7 @@ func (m Model) View() string {
 	}
 	main := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	keybindBarText := truncateKeybindBar(keybindBarFor(m.focus), m.width-2) // -2 padding, matches lazygit's own margin
+	keybindBarText := truncateKeybindBar(keybindBarFor(m.focus), m.width-2) // -2 padding
 	keybindText := keybindBarText
 	if m.selectMode {
 		keybindText = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).

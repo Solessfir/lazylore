@@ -23,12 +23,8 @@ type diffModel struct {
 
 func newDiffModel(width, height int) diffModel {
 	vp := viewport.New(width, height)
-	// The diff pane never wraps or scrolls horizontally (lazygit clips
-	// instead) - a stray left/right arrow press while it's focused would
-	// otherwise scroll it via viewport's own default keymap, silently
-	// offsetting every line rendered afterward (see viewWithScrollbar's
-	// ansi.Cut(..., xOffset, ...) call inside bubbles itself) until a wide
-	// enough line exposed it as visibly cut-off/garbled text.
+	// No horizontal scroll: a stray left/right arrow while focused would
+	// otherwise offset every line via viewport's own default keymap.
 	vp.KeyMap.Left = key.Binding{}
 	vp.KeyMap.Right = key.Binding{}
 	return diffModel{vp: vp}
@@ -91,12 +87,8 @@ func (m diffModel) viewWithScrollbar() string {
 	}
 
 	innerW := m.vp.Width
-	// Pad-or-truncate every line to exactly innerW so the scrollbar lands
-	// flush against the right border. Must go through lipgloss (ANSI-aware)
-	// rather than slicing runes directly - colorizeDiff-styled lines carry
-	// ANSI escape codes, and a raw []rune slice cuts through the middle of
-	// those on any line longer than innerW, corrupting the terminal's color
-	// state for everything rendered afterward.
+	// ANSI-aware pad/truncate (not a raw []rune slice, which would cut
+	// through colorizeDiff's escape codes and corrupt later lines).
 	cellStyle := lipgloss.NewStyle().Width(innerW).MaxWidth(innerW)
 	var result []string
 	for i, line := range lines {

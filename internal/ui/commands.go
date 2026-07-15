@@ -47,10 +47,9 @@ func loadDiffCmd(r lore.Runner, path string, lock lore.Lock, locked bool) tea.Cm
 }
 
 // enrichFileDiffText prepends a lock line when the file is locked, and
-// renames lore's bare "Binary files differ" marker (lore-revision/src/file/
-// diff.rs's emit_binary_diff has no filename baked in, unlike git's own
-// binary-diff line) to name the file - for a locked binary file the diff
-// text is otherwise the only thing shown, so both are worth surfacing here.
+// names the file in lore's bare "Binary files differ" marker (it has no
+// filename baked in) - for a locked binary file the diff text is otherwise
+// the only thing shown, so both are worth surfacing.
 func enrichFileDiffText(text, path string, lock lore.Lock, locked bool) string {
 	const binaryMarker = "Binary files differ"
 	if strings.Contains(text, binaryMarker) {
@@ -70,7 +69,7 @@ func loadCurrentUserCmd(r lore.Runner) tea.Cmd {
 }
 
 // loadBranchLogCmd fills the main panel with branch's revision log, for
-// when the Branches panel is focused (lazygit's "Log" main view).
+// when the Branches panel is focused.
 func loadBranchLogCmd(r lore.Runner, branch string) tea.Cmd {
 	return func() tea.Msg {
 		revisions, err := lore.HistoryForBranch(r, branch, 50)
@@ -82,11 +81,8 @@ func loadBranchLogCmd(r lore.Runner, branch string) tea.Cmd {
 }
 
 // loadRevisionPatchCmd fills the main panel with the selected revision's
-// full patch, for when the History panel is focused (lazygit's "Patch"
-// main view). Callers pass parent == "" for the root revision (lore.
-// IsZeroHash) - it has no parent to diff against, which lore diff --source
-// can't target, so this skips the call rather than guess at a comparison
-// lore doesn't expose.
+// full patch. Callers pass parent == "" for the root revision - it has no
+// parent to diff against, so this skips the call rather than guess.
 func loadRevisionPatchCmd(r lore.Runner, parent, revision string) tea.Cmd {
 	return func() tea.Msg {
 		if parent == "" {
@@ -157,12 +153,10 @@ func lockToggleCmd(r lore.Runner, path string, locked bool) tea.Cmd {
 	}
 }
 
-// lockForceReleaseCmd is lockToggleCmd's unlock branch, but for someone
-// else's lock via LockReleaseForce - only reachable after the
-// promptConfirmForceUnlock confirm (see keys.go), and only actually
-// succeeds against a lore build with the AdminUnlock capability; against
-// stock lore it fails the same way a plain release on someone else's lock
-// always has, surfaced through the normal actionDoneMsg error path.
+// lockForceReleaseCmd is lockToggleCmd's unlock branch for someone else's
+// lock via LockReleaseForce - only reachable after the
+// promptConfirmForceUnlock confirm, and only succeeds against a lore build
+// with the AdminUnlock capability.
 func lockForceReleaseCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
@@ -193,13 +187,10 @@ func unstageCmd(r lore.Runner, path string) tea.Cmd {
 	}
 }
 
-// dirStageCmd is stageCmd's recursive analog for a directory/root row (see
-// Model.toggleDirStage): lore stage on a directory path recurses over every
-// already-dirty file under it, so a failed call needs its revert to flip
-// every optimistically-updated row back, not just one path - dirPath is the
-// fileItem-space prefix ("" for the root row) used for that revert, while
-// lorePath is the actual lore CLI argument ("." for the root row, since
-// lore has no path for the synthetic root).
+// dirStageCmd is stageCmd's recursive analog for a directory/root row: a
+// failed call reverts every optimistically-updated row under it, not just
+// one path. dirPath is the fileItem-space prefix ("" for the root row);
+// lorePath is the actual lore CLI argument ("." for the root row).
 func dirStageCmd(r lore.Runner, dirPath, lorePath string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
@@ -219,14 +210,10 @@ func dirUnstageCmd(r lore.Runner, dirPath, lorePath string) tea.Cmd {
 }
 
 // discardUnstagedInDirCmd discards only the given paths - the unstaged
-// files under a directory row's discard menu (see the "u" case in
-// handlePromptKey), leaving any staged files elsewhere under that directory
-// untouched. Staging in lore is all-or-nothing per file (confirmed: editing
-// an already-staged file keeps the whole file staged, it never splits into
-// a separate unstaged diff on top), so "discard unstaged" only means
-// anything at directory granularity - some files under it staged, others
-// not - never for a single file, which is why this only takes a directory's
-// pre-filtered path list rather than being a general single-path op.
+// files under a directory row's discard menu - leaving any staged files
+// elsewhere under that directory untouched. Staging in lore is
+// all-or-nothing per file, so this only makes sense at directory
+// granularity, never for a single file.
 func discardUnstagedInDirCmd(r lore.Runner, paths []string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}

@@ -12,11 +12,9 @@ import (
 )
 
 func TestModel_ResizeLeavesAtLeastOneColumnOfMargin(t *testing.T) {
-	// Regression: panel widths used to sum to exactly m.width with zero
-	// margin - at that exact fit, a single-column width mismatch anywhere
-	// (a terminal's own edge-of-screen wrap behavior, or a glyph like
-	// ▼/✓/█ rendering one column wider than lipgloss counts it) wrapped a
-	// row and cascaded a visual shift through every panel below it.
+	// Panel widths must sum to strictly less than the terminal width - at an
+	// exact fit, a single-column mismatch (terminal wrap quirks, a glyph
+	// rendering one column wider than lipgloss counts it) wraps a row.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 141, Height: 40})
 	m2 := updated.(Model)
@@ -56,10 +54,7 @@ func TestModel_RevealStatusMsgShowsSpinnerWhenStillCurrent(t *testing.T) {
 }
 
 func TestModel_RevealStatusMsgSkippedWhenActionAlreadyFinished(t *testing.T) {
-	// Regression: the whole point of the delay is that a fast action (e.g.
-	// stage/unstage) completes and clears appStatus before the reveal timer
-	// fires - the stale reveal must not un-clear it and flash the spinner
-	// after the fact.
+	// A stale reveal (its action already finished) must not re-flash the spinner.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(setAppStatusMsg("Staging..."))
 	m2 := updated.(Model)
@@ -80,12 +75,9 @@ func TestModel_RevealStatusMsgSkippedWhenActionAlreadyFinished(t *testing.T) {
 }
 
 func TestModel_HistoryRecolorsWhenStatusArrivesAfterHistory(t *testing.T) {
-	// Regression: statusMsg and historyMsg load independently (Init()
-	// batches both) with no ordering guarantee. Unpushed coloring depends
-	// on data from BOTH - if historyMsg happens to land first, the initial
-	// render has no remote info yet (nothing marked unpushed); statusMsg
-	// landing afterward must still recolor the already-rendered list, not
-	// wait for a future historyMsg that may never come.
+	// statusMsg and historyMsg load independently with no ordering guarantee.
+	// If historyMsg lands first (no remote info yet), a later statusMsg must
+	// still recolor the already-rendered list.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{{Number: 2, Hash: "abc", Message: "local only"}}})
 	m2 := updated.(Model)
@@ -136,10 +128,6 @@ func TestModel_MainPanelTitle_MatchesLazygitPerContext(t *testing.T) {
 }
 
 func TestModel_MainPanelTitle_PersistsSourceWhenDiffPanelItselfFocused(t *testing.T) {
-	// Regression: tabbing into the Diff panel itself must keep showing
-	// whichever panel's content (Log/Patch/diff) is actually loaded, not
-	// fall back to reading the Files selection just because m.focus is no
-	// longer Files/Branches/History.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	m.focus = focusBranches
 	(&m).ensureMainContent()
@@ -150,9 +138,8 @@ func TestModel_MainPanelTitle_PersistsSourceWhenDiffPanelItselfFocused(t *testin
 }
 
 func TestModel_EnsureMainContent_SelectingDirectoryClearsDiff(t *testing.T) {
-	// Matches lazygit: selecting a directory clears the main panel instead
-	// of leaving the last-selected file's diff (including its "Locked by
-	// ..." line) stuck on screen.
+	// Selecting a directory clears the main panel instead of leaving the
+	// last-selected file's diff stuck on screen.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})
 	m2 := updated.(Model)
@@ -558,11 +545,6 @@ func TestModel_ActionDoneMsgAppendsToCommandLogAndRefreshes(t *testing.T) {
 }
 
 func TestModel_ActionDoneMsgSkipsRefreshWhileAnotherFileOpIsPending(t *testing.T) {
-	// Regression: staging one file, then staging a whole folder before the
-	// first stage's response came back, used to cause a visible flicker -
-	// the first stage's completion refreshed status from the server before
-	// the folder-stage's own call had landed there, briefly reverting the
-	// folder-stage's optimistic all-green UI back to partially staged.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	m.pendingFileOps = map[string]bool{"stage:src": true} // the folder-stage is still in flight
 
@@ -594,9 +576,6 @@ func TestModel_ActionDoneMsgSkipsRefreshWhileAnotherFileOpIsPending(t *testing.T
 }
 
 func TestModel_HistoryMsgUpdatesTotalEvenWhileFiltering(t *testing.T) {
-	// Regression: historyMsg used to return early (skipping historyTotal and
-	// chrome bookkeeping) whenever list.SetItems returned a non-nil cmd,
-	// which only happens while the panel has an active filter.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	m.focus = focusHistory
 	updated, _ := m.Update(historyMsg{revisions: []lore.Revision{{Number: 1, Message: "first"}}})
@@ -621,9 +600,6 @@ func TestModel_HistoryMsgUpdatesTotalEvenWhileFiltering(t *testing.T) {
 }
 
 func TestModel_RefreshBranchesListPropagatesFilterCmd(t *testing.T) {
-	// Regression: refreshBranchesList silently dropped the cmd SetItems
-	// returns while the Branches panel has an active filter, so a filtered
-	// view never got reconciled after a refresh.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(branchesMsg{branches: []lore.Branch{{Name: "main", Current: true}, {Name: "dev"}}})
 	m2 := updated.(Model)

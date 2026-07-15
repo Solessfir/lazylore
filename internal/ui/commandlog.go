@@ -6,17 +6,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// commandLogActionStyle matches lazygit's own command log title color
-// (pkg/gui/command_log_panel.go's LogAction: style.FgYellow) - the plain
-// command lines under it use the terminal's default text color there too,
-// so they get no style override here.
+// commandLogActionStyle colors the log's action title gold; the plain
+// command lines under it use the terminal's default text color.
 var commandLogActionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 
-// commandLogEntry is one user-initiated action: a human title (rendered
-// gold, like lazygit's LogAction) plus the actual lore command line(s) it
-// ran underneath (rendered indented, like lazygit's LogCommand) - shown
-// without the leading "--json" flag since that's plumbing, not something a
-// user typing the command themselves would include.
+// commandLogEntry is one user-initiated action: a human title plus the
+// actual lore command line(s) it ran, shown without the leading "--json"
+// flag since that's plumbing, not something a user typing the command
+// themselves would include.
 type commandLogEntry struct {
 	action   string
 	commands []string

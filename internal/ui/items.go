@@ -13,21 +13,17 @@ import (
 	"lazylore/internal/lore"
 )
 
-// Colors match lazygit's actual file-status convention
-// (pkg/gui/presentation/files.go, formatFileStatus/getFileLine): a staged
-// file's status letter AND filename render green; an unstaged/untracked
-// file's status letter renders red, with the filename left uncolored -
-// there's no separate "staged"/"unstaged" text label anywhere, the color
-// alone conveys it.
+// A staged file's status letter and filename render green; an unstaged/
+// untracked file's status letter renders red, filename left uncolored -
+// the color alone conveys staged/unstaged, no text label.
 var (
 	fileStagedColor   = lipgloss.Color("2") // green
 	fileUnstagedColor = lipgloss.Color("1") // red
 )
 
-// lockBadge marks a file with an active lore file lock (see
-// internal/lore/lock.go; git/lazygit have no equivalent concept). Plain
-// ASCII rather than an emoji glyph - emoji column-width handling is
-// inconsistent across terminals, which made the badge visually misaligned.
+// lockBadge marks a file with an active lore file lock. Plain ASCII rather
+// than an emoji glyph - emoji column-width handling is inconsistent across
+// terminals, which misaligns the badge.
 const lockBadge = "[L]"
 
 // lockBadgeStyle colors the badge by ownership: green for a lock you hold
@@ -41,20 +37,15 @@ func lockBadgeStyle(lockedByMe bool) lipgloss.Style {
 }
 
 // scrollMargin is how many rows of context past the cursor scrollWindowStart
-// tries to keep visible (matching lazygit/vim "scrolloff" - you see a couple
-// of upcoming rows before the window scrolls, rather than the cursor sitting
-// dead on the last visible row before anything moves).
+// tries to keep visible ("scrolloff") - a couple of upcoming rows show
+// before the window scrolls, rather than the cursor sitting on the last
+// visible row.
 const scrollMargin = 2
 
 // scrollWindowStart returns the first visible index for a continuous
-// (non-paginated) scroll window of size height around cursor, clamped to
-// [0, total-height]. Shared by renderListWindow and rowClickTarget so
-// rendering and click hit-testing can never disagree about what's on
-// screen - unlike bubbles/list.Model's own Paginator, which pages in fixed
-// jumps (Paginator.Page = index/PerPage) rather than scrolling by one row,
-// and pads a short page with blank filler lines even when more items exist
-// just below the current page boundary (reported as a stray blank row
-// mid-list, far from the end of a 92-row tree).
+// scroll window of size height around cursor, clamped to [0, total-height].
+// Shared by renderListWindow and rowClickTarget so rendering and click
+// hit-testing can never disagree about what's on screen.
 func scrollWindowStart(cursor, total, height int) int {
 	if height <= 0 || total <= height {
 		return 0
@@ -73,11 +64,9 @@ func scrollWindowStart(cursor, total, height int) int {
 }
 
 // effectiveScrollStart resolves the window's actual top row: override when
-// it's set (>= 0, meaning mouse-wheel scrolling has panned the view away
-// from the cursor - see Model's *ScrollOverride fields) and still valid for
-// the current item count, otherwise the cursor-follow window
-// (scrollWindowStart). Shared by renderListWindow and rowClickTarget so
-// rendering and click hit-testing can never disagree about what's on screen.
+// set (>= 0, meaning mouse-wheel scrolling has panned the view away from
+// the cursor) and still valid for the current item count, otherwise the
+// cursor-follow window (scrollWindowStart).
 func effectiveScrollStart(override, cursor, total, height int) int {
 	if height <= 0 || total <= height {
 		return 0
@@ -90,10 +79,9 @@ func effectiveScrollStart(override, cursor, total, height int) int {
 
 // renderListWindow renders m's visible items through delegate in a
 // continuous scroll window (see effectiveScrollStart) instead of calling
-// list.Model's own View(), which would page in fixed jumps. Only valid
-// while m isn't actively showing its filter-input row (SettingFilter()) -
-// that row isn't accounted for here, so callers fall back to m.View()
-// while typing a filter (see view.go).
+// list.Model's own paginated View(). Only valid while m isn't actively
+// showing its filter-input row - callers fall back to m.View() while
+// typing a filter (see view.go).
 func renderListWindow(m list.Model, delegate list.ItemDelegate, height, scrollOverride int) string {
 	items := m.VisibleItems()
 	if len(items) == 0 || height <= 0 {
@@ -128,12 +116,9 @@ func fileNameStyle(staged bool) lipgloss.Style {
 
 // fileItem is one row in the Files panel: either a directory node (isDir,
 // toggled open/closed with Enter/Space) or a file leaf carrying the
-// FileChange it represents - one tree, built fresh from Status on every
-// refresh by statusToItems, with collapse state carried separately on
-// Model so it survives a refresh.
-// label is the row's display text - own name normally, or the merged
-// remainder for a row a directory chain compressed into (see filetree.go's
-// rowLabel); "/" for the synthetic root.
+// FileChange it represents. Rebuilt fresh from Status on every refresh by
+// statusToItems; collapse state is carried separately on Model so it
+// survives a refresh. label is the row's display text (see rowLabel).
 type fileItem struct {
 	path       string
 	label      string
@@ -163,16 +148,9 @@ func (d fileDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
 
 // selectedRowStyle is the highlight overlay for the row under the cursor:
 // a background fill only, no Foreground override, so the row's own status
-// coloring shows through underneath it - matching lazyp4's styleCursor
-// (internal/ui/panes/filelist.go), which wraps the already-colored line
-// rather than replacing its style outright. Width is set explicitly to the
-// list's own content width (m.Width(), captured at Render time) - without
-// it the background fill isn't bounded to this panel at all and bleeds
-// across the rest of the terminal row, past the panel's own border.
-//
-// We use the full width for the highlight (so it reaches near the right
-// border like lazygit), while individual item text may have a small right
-// gutter for breathing room.
+// coloring shows through underneath it. Width must be set explicitly to
+// the list's own content width - without it the fill isn't bounded to this
+// panel and bleeds across the rest of the terminal row.
 func selectedRowStyle(width int) lipgloss.Style {
 	return lipgloss.NewStyle().Background(selectedBg).Bold(true).Width(width)
 }
@@ -186,14 +164,9 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	selected := d.focused && index == m.Index()
 
 	if !selected {
-		// Clip to the panel's own content width via lipgloss (ANSI-aware) -
-		// a deeply indented or long-labeled row (e.g. a compressed tree
-		// chain like "Content/Sus/Blueprints") would otherwise overflow
-		// straight past the Files panel's right border into whatever panel
-		// sits beside it on the same terminal row, corrupting that row's
-		// rendering (reported as the whole layout garbling on files with
-		// long/deep paths - the selected-row branch below already guards
-		// against this via selectedRowStyle, unselected rows didn't).
+		// ANSI-aware clip to the panel's own content width - a deeply
+		// indented or long-labeled row would otherwise overflow past the
+		// Files panel's right border into the panel beside it.
 		clip := lipgloss.NewStyle().MaxWidth(m.Width())
 		if fi.isDir {
 			arrow := "▼"
@@ -405,12 +378,9 @@ func (i revisionItem) Description() string { return "" }
 func (i revisionItem) FilterValue() string { return i.revision.Message }
 
 // historyToItems builds the History panel's rows, marking each revision
-// unpushed when it's newer than the remote branch's latest known revision
-// (see lore.Status.RemoteRevisionNumber) - matching lazygit's own unpushed/
-// pushed hash coloring (pkg/gui/presentation/commits.go's getHashColor).
-// remoteRevisionNumber/hasRemoteInfo come from the same Status the ahead/
-// behind arrows use; when hasRemoteInfo is false (offline, unauthorized)
-// nothing is marked unpushed rather than guessing.
+// unpushed when it's newer than the remote branch's latest known revision.
+// When hasRemoteInfo is false (offline, unauthorized), nothing is marked
+// unpushed rather than guessing.
 func historyToItems(revisions []lore.Revision, remoteRevisionNumber uint64, hasRemoteInfo bool) []list.Item {
 	items := make([]list.Item, 0, len(revisions))
 	for _, rv := range revisions {

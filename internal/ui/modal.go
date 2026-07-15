@@ -8,9 +8,7 @@ import (
 )
 
 // One universal centered-popup system (see overlay.go) backs every prompt,
-// confirmation, and the keybindings overlay - matching how lazyp4
-// (C:\Git\lazyp4\internal\ui\app.go's styleModalBox/renderConfirmModal/
-// renderHelpModal) renders all of its own popups through a single style.
+// confirmation, and the keybindings overlay through a single style.
 var (
 	modalBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -56,15 +54,11 @@ func (m Model) renderPromptModal() string {
 	}
 }
 
-// renderDiscardMenuModal renders the "d" discard menu: matches lazygit's
-// own two-option "Discard Changes" popup (files_controller.go's remove(),
-// Files.ConfirmDiscard="x"/discardUnstagedChangesItem's "u") rather than
-// lazylore's older single yes/no discard prompt. "Discard unstaged changes"
-// only means anything for a directory that has both staged and unstaged
-// files under it - lore stages a file as a whole (editing an already-staged
-// file keeps the entire file staged, never splitting into a further
-// unstaged diff on top), so a single file is never "mixed" and the option
-// stays struck through for it.
+// renderDiscardMenuModal renders the "d" discard menu (x = discard all,
+// u = discard unstaged). "Discard unstaged" only means anything for a
+// directory with both staged and unstaged files under it - lore stages a
+// file as a whole, so a single file is never "mixed" and the option stays
+// struck through for it.
 func (m Model) renderDiscardMenuModal() string {
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Strikethrough(true)
 

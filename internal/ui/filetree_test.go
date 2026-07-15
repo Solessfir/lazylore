@@ -15,10 +15,8 @@ func TestBuildFileTree_EmptyStatusHasNoRows(t *testing.T) {
 }
 
 func TestBuildFileTree_SkipsPathsWithNoFilenameSegment(t *testing.T) {
-	// Regression: a trailing slash (or an outright empty path) makes
-	// strings.Split produce an empty last segment, inserting a blank-
-	// labeled leaf row - reported as an unexplained empty row in the
-	// Files panel.
+	// A trailing slash (or an outright empty path) makes strings.Split
+	// produce an empty last segment, which would insert a blank-labeled leaf row.
 	s := lore.Status{Unstaged: []lore.FileChange{
 		{Status: 'M', Path: "a.txt"},
 		{Status: 'A', Path: "Resources/"},

@@ -2,16 +2,9 @@ package ui
 
 // layoutBox is one child in a weighted space distribution: either a fixed
 // Size, or a proportional Weight sharing whatever space is left over after
-// every fixed-size sibling is satisfied.
-//
-// This mirrors lazygit's own boxlayout package
-// (vendor/github.com/jesseduffield/lazycore/pkg/boxlayout, func calcSizes)
-// stripped down to what a fixed 4-panel layout needs (no weight
-// normalization, no nested trees - just the part that matters here: never
-// dropping the integer-division remainder). Plain `available / n` silently
-// drops that remainder, leaving weighted panels short of the space a
-// sibling widget actually got - exactly the bug that made the panels not
-// line up with the Diff viewport next to them.
+// every fixed-size sibling is satisfied. distributeSpace never drops the
+// integer-division remainder (plain `available / n` would), so weighted
+// panels stay exactly aligned with sibling widgets sized independently.
 type layoutBox struct {
 	Size   int
 	Weight int

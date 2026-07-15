@@ -92,46 +92,34 @@ type Model struct {
 	diffHeight     int
 
 	// *ScrollOverride is the Files/Branches/History scroll window's top row,
-	// set by mouse-wheel scrolling (see handleMouseWheel) so the view can
-	// pan independently of the selected row - matching lazygit, where the
-	// wheel moves what's visible without moving the cursor. -1 means no
-	// override: the window just follows the cursor (scrollWindowStart).
-	// Cleared back to -1 by any keyboard/click cursor movement, so the view
-	// snaps back to following the selection the moment the user interacts
-	// with it that way again.
+	// set by mouse-wheel scrolling so the view can pan independently of the
+	// selected row. -1 means no override: the window follows the cursor
+	// (scrollWindowStart). Cleared back to -1 by any keyboard/click cursor
+	// movement.
 	filesScrollOverride    int
 	branchesScrollOverride int
 	historyScrollOverride  int
 }
 
-// Colors match lazygit's actual default theme (pkg/config/user_config.go):
-// ActiveBorderColor "green bold", SelectedLineBgColor "blue" (a background
-// fill, not just a foreground change - that's what makes lazygit's
-// selected row unmistakable regardless of terminal color profile).
-// Basic 16-color ANSI codes only (0-15), since those are the one palette
-// every terminal renders correctly - no 256-color/TrueColor detection to
-// get wrong.
+// Selected-row colors: a background fill, not just a foreground change, so
+// the selected row is unmistakable regardless of terminal color profile.
+// Basic 16-color ANSI codes only (0-15) - the one palette every terminal
+// renders correctly.
 var (
-	selectedBg = lipgloss.Color("4")  // blue, matches lazygit's SelectedLineBgColor
+	selectedBg = lipgloss.Color("4")  // blue
 	selectedFg = lipgloss.Color("15") // bright white, for contrast against the blue fill
 )
 
 // newListDelegate returns a list.ItemDelegate for a list's selected row.
-// Each list keeps its own cursor position regardless of which panel our
-// own app-level focus is on, so without this distinction every list would
-// show a highlighted row at once - only the panel that's actually focused
-// should get the strong background fill; the others get a much subtler
-// style, matching lazygit's own InactiveViewSelectedLineBgColor: "bold"
-// (no background fill at all for unfocused panels).
+// Only the panel that's actually focused gets the strong background fill;
+// others get a subtler bold-only style, since each list keeps its own
+// cursor regardless of app-level focus.
 //
-// width bounds the background fill to the panel's own content width.
-// list.DefaultDelegate.Render (bubbles' own code, not ours) never calls
-// .Width() on the selected style itself, so without setting it here the
-// fill isn't bounded to this panel at all - it bleeds across the rest of
-// the terminal row, past the panel's own border. Because the delegate
-// bakes width in at construction time rather than reading it live, callers
-// must rebuild it (via syncFocusDelegates) whenever that width changes,
-// not just when focus changes - resize() does both.
+// width bounds the background fill to the panel's own content width -
+// list.DefaultDelegate.Render never calls .Width() on the selected style
+// itself, so without it the fill bleeds across the rest of the terminal
+// row. The delegate bakes width in at construction time, so callers must
+// rebuild it (via syncFocusDelegates) whenever that width changes.
 func newListDelegate(focused bool, width int) list.ItemDelegate {
 	d := list.NewDefaultDelegate()
 	if focused {
@@ -167,11 +155,8 @@ func newPanelList(delegate list.ItemDelegate) list.Model {
 
 // syncFocusDelegates re-applies the focused/unfocused delegate to each of
 // the Files/Branches/History lists to match m.focus, called whenever focus
-// changes. list.Model has no "am I focused" concept of its own - that's
-// this app's, so the delegate has to be pushed in from outside.
-//
-// For Branches and History we now use compact single-line delegates (no
-// description rows) to more closely match lazygit row density.
+// changes. list.Model has no "am I focused" concept of its own, so the
+// delegate has to be pushed in from outside.
 func (m *Model) syncFocusDelegates() {
 	m.files.SetDelegate(fileDelegate{focused: m.focus == focusFiles})
 	m.branches.SetDelegate(compactTitleDelegate{focused: m.focus == focusBranches, width: m.panelWidth})
@@ -188,15 +173,10 @@ func (m *Model) syncFocusDelegates() {
 
 // rowClickTarget maps a list panel's clicked row (relY, 0-based within the
 // panel's content area) to the absolute item index it corresponds to, or
-// ok=false if relY falls below the last real row on screen.
-//
-// cursor/total/perPage/scrollOverride must match what renderListWindow (see
-// items.go) was just called with, so the two can never disagree about
-// what's on screen - effectiveScrollStart is the single source of truth
-// both derive from, rather than each independently computing (or, as
-// before this switched away from bubbles/list.Model's own pagination,
-// reading) a page boundary that could drift out of sync between the
-// render and the click.
+// ok=false if relY falls below the last real row on screen. cursor/total/
+// perPage/scrollOverride must match what renderListWindow (items.go) was
+// just called with - both derive from effectiveScrollStart, so render and
+// click can never disagree about what's on screen.
 func rowClickTarget(cursor, total, perPage, scrollOverride, relY int) (int, bool) {
 	if perPage < 1 {
 		perPage = 1
@@ -627,18 +607,11 @@ func (m *Model) setDirStagedByPrefix(dirPath string, from, to bool) tea.Cmd {
 }
 
 // toggleDirStage handles space on a directory (or the root "/" row, path
-// ""): matches lazygit's own directory behavior (files_controller.go's
-// press/toggleStaged), not lazylore's old behavior of treating space on a
-// directory the same as Enter (collapse toggle - still Enter's job, see
-// keys.go). If anything under the directory is unstaged, stage all of it;
-// otherwise unstage everything staged under it; no-op if the directory has
-// no changes at all. lore stage/unstage accept a directory path directly
-// and recurse over already-dirty files under it without needing --scan
-// (lore-client's FileStageArgs doc: "without --scan, directory staging
-// stages only files already marked dirty under that directory" - exactly
-// the already-known-dirty files this tree is built from), so one call
-// covers the whole subtree; "." stands in for the repo root since lore has
-// no path for the synthetic "/" row itself.
+// ""): if anything under it is unstaged, stage all of it; otherwise
+// unstage everything staged; no-op if nothing has changed. `lore stage`/
+// `unstage` on a directory path recurse over already-dirty files under it
+// without needing --scan, so one call covers the whole subtree; "." stands
+// in for the repo root since lore has no path for the synthetic "/" row.
 func (m *Model) toggleDirStage(dirPath string) tea.Cmd {
 	hasUnstaged, hasStaged := m.dirStageCounts(dirPath)
 	if !hasUnstaged && !hasStaged {
@@ -760,31 +733,19 @@ const (
 
 // commandLogPanelHeight is the full outer height (incl. borders) of the
 // command log panel placed directly below the Diff on the right side only.
-// This matches lazygit where the "extras" / command log lives under the main
-// (diff) window rather than spanning under the entire left+right area.
 const commandLogPanelHeight = 10
 
 // resize propagates the terminal size to every sub-widget: a Status panel
 // plus stacked lists on the left (Files/Branches/History), the diff
 // viewport + command log panel below it on the right, plus the prompt/error
-// footer and global keybinding bar.
-//
-// Sizes are computed with distributeSpace (see boxlayout.go) rather than
-// plain division, so the panels always sum to exactly the space available
-// - matching lazygit's own approach (side panels at weight 1 apiece below
-// a fixed-height status box) instead of silently losing a row or two to
-// integer-division truncation, which left this layout visibly misaligned.
+// footer and global keybinding bar. Sizes go through distributeSpace (see
+// boxlayout.go), not plain division, so the panels always sum to exactly
+// the space available.
 func (m *Model) resize() {
 	// Reserve 1 column of slack instead of filling the terminal to its
-	// exact last column. At an exact fit (panel widths summing to exactly
-	// m.width), a single-column mismatch anywhere - a terminal's own
-	// edge-of-screen auto-wrap behavior, or a glyph this UI uses (▼/▶
-	// tree arrows, ✓, the █ scrollbar thumb) rendering one column wider
-	// in some terminal/font than lipgloss counts it - wraps that row and
-	// visually cascades a shift through every panel below it. Confirmed
-	// via debug logging: reported-corrupted rows measured well under
-	// their panel's own content width, but the two panels' widths summed
-	// to exactly the terminal's reported width with zero margin.
+	// exact last column - at an exact fit, a single-column mismatch
+	// anywhere (terminal wrap quirks, a glyph rendering one column wider
+	// than lipgloss counts it) cascades a visual shift through every panel below it.
 	usableWidth := max(0, m.width-1)
 	widths := distributeSpace([]layoutBox{{Weight: 1}, {Weight: 2}}, usableWidth)
 	leftWidth := widths[0]
@@ -840,17 +801,10 @@ func (m *Model) recomputePanelHeights() {
 	m.diffHeight = max(0, diffOuter-borderHeight)
 }
 
-// rebuildHistoryItems recomputes the History list's items (including
-// unpushed/pushed hash coloring) from the model's last-known revisions and
-// status. Called from both statusMsg and historyMsg handlers since either
-// can determine a row's color and they load independently - whichever
-// arrives second must still leave the list correct.
 // rebuildFileItems recomputes the Files list's items (including lock/
 // lockedByMe badges) from the model's last-known status/locks/currentUserID.
-// Called from every handler that can independently learn one of those three
-// (statusMsg, locksMsg, currentUserMsg, toggleDirCollapse) since they load
-// independently and can arrive in any order - whichever lands last must
-// still leave the list correct, same reasoning as rebuildHistoryItems below.
+// Called from every handler that can independently learn one of those
+// three, since they load independently and can arrive in any order.
 func (m *Model) rebuildFileItems() tea.Cmd {
 	items := statusToItems(m.status, m.collapsedDirs, m.locks, m.currentUserID)
 	cmd := m.files.SetItems(items)
@@ -860,6 +814,10 @@ func (m *Model) rebuildFileItems() tea.Cmd {
 	return cmd
 }
 
+// rebuildHistoryItems recomputes the History list's items (including
+// unpushed/pushed hash coloring) from the model's last-known revisions and
+// status - called from both statusMsg and historyMsg handlers, since either
+// can arrive first.
 func (m *Model) rebuildHistoryItems() tea.Cmd {
 	items := historyToItems(m.revisions, m.status.RemoteRevisionNumber, m.status.HasRemoteInfo)
 	cmd := m.history.SetItems(items)
@@ -870,10 +828,7 @@ func (m *Model) rebuildHistoryItems() tea.Cmd {
 }
 
 // mainPanelTitle returns the shared main panel's title for whatever's
-// currently focused, matching lazygit's contextual main view (checked
-// against pkg/gui/controllers/files_controller.go's renderWorkingTreeDiff,
-// branches_controller.go's LogTitle, and local_commits_controller.go's
-// hardcoded "Patch"): Files shows "Unstaged changes"/"Staged changes" for
+// currently focused: Files shows "Unstaged changes"/"Staged changes" for
 // the selected file, Branches shows "Log", History shows "Patch".
 func (m Model) mainPanelTitle() string {
 	switch m.mainContentSource {
@@ -941,9 +896,8 @@ func (m *Model) ensureMainContent() tea.Cmd {
 			return nil
 		}
 		if item.isDir {
-			// Matches lazygit: selecting a directory clears the main panel
-			// instead of leaving the last-selected file's diff (and its
-			// "Locked by ..." line) stuck on screen.
+			// Selecting a directory clears the main panel instead of leaving
+			// the last-selected file's diff stuck on screen.
 			if m.currentDiffPath != "" {
 				m.currentDiffPath = ""
 				m.diff.SetContentRaw("")

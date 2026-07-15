@@ -60,9 +60,7 @@ func TestModel_OneKeyJumpsToStatus(t *testing.T) {
 }
 
 func TestModel_TwoKeyJumpsToFiles(t *testing.T) {
-	// Regression: "1" and "2" used to both jump to Files (Status had no
-	// focusable state of its own) - lazygit's real numbering (Gui.SidePanels)
-	// is 1=Status, 2=Files, distinct panels.
+	// "1" jumps to Status, "2" to Files - distinct panels, not both Files.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	m.focus = focusStatus
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
@@ -158,10 +156,8 @@ func TestModel_SixKeyFocusesCommandLogAndExpandsItOverDiff(t *testing.T) {
 }
 
 func TestModel_MouseWheelPansFilesViewWithoutMovingSelectionOrChangingFocus(t *testing.T) {
-	// Matches lazygit: the wheel moves what's visible, not the cursor -
-	// unlike keyboard/click navigation, which snaps the view back to
-	// following the selection (see updateFocusedList/handleMouseClick
-	// clearing filesScrollOverride).
+	// The wheel moves what's visible, not the cursor - unlike keyboard/click
+	// navigation, which snaps the view back to following the selection.
 	var files []lore.FileChange
 	for i := 0; i < 30; i++ {
 		files = append(files, lore.FileChange{Status: 'M', Path: fmt.Sprintf("file%02d.txt", i)})
@@ -490,11 +486,9 @@ func TestModel_LKeyOnOwnLockedFileReleasesLockImmediately(t *testing.T) {
 }
 
 func TestModel_LKeyOnOtherOwnersLockedFileOpensForceUnlockConfirm(t *testing.T) {
-	// Matches lazygit's own confirm-before-destructive-action pattern
-	// (discard/reset/revert) - unlocking someone else's lock shouldn't fire
-	// on a bare keypress, since it either no-ops against stock lore or
-	// actually releases another person's lock against a lore fork with the
-	// AdminUnlock capability.
+	// Unlocking someone else's lock shouldn't fire on a bare keypress - it
+	// either no-ops against stock lore, or actually releases another
+	// person's lock against a lore fork with the AdminUnlock capability.
 	fake := &lore.FakeRunner{}
 	m := NewModel(fake, "test-repo", "/repo")
 	m.currentUserID = "me"
@@ -568,13 +562,8 @@ func TestModel_CancellingForceUnlockMakesNoRunnerCalls(t *testing.T) {
 }
 
 func TestModel_LockConfirmUpdatesLocksMapBeforeRefreshRebuildsItems(t *testing.T) {
-	// Regression: after a successful lock acquire, refreshCmd's statusMsg
-	// rebuilds Files from m.locks - but its own loadLocksCmd (dispatched in
-	// that same handler) hasn't resolved yet, so without actionDoneMsg's
-	// confirm updating m.locks immediately, that rebuild used to run
-	// against the still-stale (pre-lock) m.locks and show the badge
-	// disappearing for a frame before the real loadLocksCmd caught up -
-	// the reported "[L] blinks" bug.
+	// actionDoneMsg's confirm must update m.locks immediately - refreshCmd's
+	// statusMsg rebuilds Files from m.locks before loadLocksCmd resolves.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(currentUserMsg{id: "user-123"})
 	m2 := updated.(Model)
@@ -690,10 +679,6 @@ func TestModel_FailedStageRevertsOptimisticFlipAndClearsPending(t *testing.T) {
 }
 
 func TestModel_ActionFailureOnlyLogsToCommandLogNotFooter(t *testing.T) {
-	// Regression: actionDoneMsg used to both append to the Command Log AND
-	// set m.err (rendered in currentFooter, near the keybind bar) - the
-	// same failure shown twice. m.err must stay untouched here; the
-	// Command Log is the only place this error should surface.
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
@@ -911,9 +896,6 @@ func TestModel_MouseClickIgnoredWhileHelpOpen(t *testing.T) {
 }
 
 func TestModel_VKeyWhileFilteringGoesToFilterInputNotSelectMode(t *testing.T) {
-	// Regression: 'v' used to be checked before the filter-typing bypass,
-	// so it hijacked the keystroke instead of reaching the filter box -
-	// making any filter query containing "v" untypable.
 	fake := &lore.FakeRunner{}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "view.go"}}}})
@@ -1113,10 +1095,8 @@ func TestModel_EnterOnDirectoryTogglesCollapseInsteadOfLoadingDiff(t *testing.T)
 }
 
 func TestModel_AKeyStagesEverythingRegardlessOfSelection(t *testing.T) {
-	// Matches lazygit's "a" (toggleStagedAll): same stage-if-anything's-
-	// unstaged-else-unstage rule as space on a directory, just always
-	// applied to the whole tree via toggleDirStage("") - "." is lore's
-	// repo-root path since there's no real path for the synthetic root row.
+	// "." is lore's repo-root path, used since there's no real path for
+	// the synthetic root row.
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json stage .": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
@@ -1147,10 +1127,6 @@ func TestModel_AKeyStagesEverythingRegardlessOfSelection(t *testing.T) {
 }
 
 func TestModel_SpaceOnDirectoryStagesEverythingUnderItRecursively(t *testing.T) {
-	// Matches lazygit's own Files-panel space key (files_controller.go's
-	// press/toggleStaged): space on a directory stages every unstaged file
-	// under it in one lore call, rather than colliding with Enter's collapse
-	// toggle (see TestModel_EnterOnDirectoryTogglesCollapseInsteadOfLoadingDiff).
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json stage src": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
@@ -1177,11 +1153,9 @@ func TestModel_SpaceOnDirectoryStagesEverythingUnderItRecursively(t *testing.T) 
 }
 
 func TestModel_DKeyOnDirectoryOpensDiscardMenuWithUnstagedDisabledWhenNotMixed(t *testing.T) {
-	// Matches lazygit's Universal.Remove: "d" opens the same discard menu
-	// for a directory as for a file (files_controller.go's remove() takes
-	// selectedNodes, not a single file). "u" stays disabled here since
-	// every file under "src" is unstaged - nothing staged to preserve, so
-	// "discard unstaged" and "discard all" would do the exact same thing.
+	// "u" stays disabled here since every file under "src" is unstaged -
+	// nothing staged to preserve, so "discard unstaged" and "discard all"
+	// would do the exact same thing.
 	fake := &lore.FakeRunner{}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})

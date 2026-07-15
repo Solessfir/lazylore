@@ -66,12 +66,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		(&m).recomputePanelHeights()
 		return m, (&m).ensureMainContent()
 
-	// Panel jump keys, matching lazygit's real numbering exactly
-	// (pkg/config/user_config.go's default Gui.SidePanels: 1=Status,
-	// 2=Files, 3=Branches, 4=Commits, 5=Stash) except 5, repurposed for
-	// Diff since lore has no stash - lazygit doesn't number its main panel
-	// at all (it's reached via NextBlock/PrevBlock, not a jump key), but
-	// lazylore's simpler layout treats Diff as a fifth jumpable panel.
+	// Panel jump keys: 1=Status, 2=Files, 3=Branches, 4=History, 5=Diff, 6=Command Log.
 	case "1":
 		m.focus = focusStatus
 		m.syncFocusDelegates()
@@ -100,12 +95,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		(&m).recomputePanelHeights()
 		return m, nil
 
-	// Cycle the focused panel's own sub-tabs, matching lazygit's global
-	// NextTab/PrevTab ("]"/"["): only Branches has more than one in lore
-	// (Local/Remotes - no Tags, no Files/History/Status equivalent to
-	// git's worktrees/submodules/reflog), so this no-ops elsewhere, same
-	// as lazygit on a single-tab window. Hidden from the bottom bar in
-	// lazygit too (no DisplayOnScreen on that binding) - see "?" instead.
+	// Cycle the focused panel's sub-tabs - only Branches has more than one
+	// (Local/Remotes), so this no-ops elsewhere.
 	case "[", "]":
 		if m.focus == focusBranches {
 			m.showRemoteBranches = !m.showRemoteBranches
@@ -191,9 +182,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		switch m.focus {
 		case focusFiles:
-			// Matches lazygit's Universal.Remove ("d"): same menu for a file
-			// or a directory row (files_controller.go's remove/withItems
-			// applies uniformly to both), not a separate key for folders.
+			// Same menu for a file or a directory row, no separate key for folders.
 			if item, ok := m.files.SelectedItem().(fileItem); ok {
 				lorePath := item.path
 				if lorePath == "" {
@@ -275,12 +264,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if item, ok := m.files.SelectedItem().(fileItem); ok && !item.isDir {
 				path := item.change.Path
 				wasLocked := item.locked
-				// Unlocking someone else's lock needs a confirm - it either
-				// no-ops against a stock lore build (see LockReleaseForce)
-				// or actually releases another person's lock against a
-				// fork with the AdminUnlock capability, so it shouldn't
-				// fire on a bare keypress the way toggling your own
-				// lock/unlock does.
+				// Unlocking someone else's lock needs a confirm - it can
+				// actually release another person's lock, unlike toggling
+				// your own lock/unlock.
 				if wasLocked && !item.lockedByMe {
 					m.prompt = promptConfirmForceUnlock
 					m.pendingForceUnlockPath = path

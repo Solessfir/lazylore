@@ -7,24 +7,18 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// These helpers produce lazygit-style titled borders by post-processing
-// a lipgloss bordered box render. The title (and optional jump number prefix)
-// is drawn as part of the top border line itself, e.g.:
+// These helpers produce titled borders by post-processing a lipgloss
+// bordered box render. The title (and optional jump number prefix) is
+// drawn as part of the top border line itself, e.g.:
 //
 //	╭───[1]─Files────────────────────────────╮
 //
-// instead of rendering "Files" as the first interior content row.
-//
-// This matches the visual treatment in:
-// - lazygit (gocui drawTitle draws into the top frame at y0+prefix)
-// - lazyp4 (internal/ui/panes/common.go injectTitle)
-//
-// Border colors come from the focused/unfocused panel styles. We recolor
-// the injected top line to keep the "frame" appearance consistent.
-
+// instead of rendering "Files" as the first interior content row. Border
+// colors come from the focused/unfocused panel styles; the injected top
+// line is recolored to keep the "frame" appearance consistent.
 var (
-	borderFocused   = lipgloss.Color("2") // green for focused (lazygit)
-	borderUnfocused = lipgloss.Color("7") // white for inactive borders (lazygit)
+	borderFocused   = lipgloss.Color("2") // green for focused
+	borderUnfocused = lipgloss.Color("7") // white for inactive borders
 )
 
 // injectTitle replaces the top border of a rendered rounded box with a
@@ -135,13 +129,10 @@ func injectDualTitle(rendered, num, firstName, secondName string, firstActive bo
 }
 
 // renderTitledPanel renders a bordered panel whose title lives in the top
-// border (via injectTitle), not as an interior content line. This frees the
-// entire interior height for actual list/diff content.
-//
-// The width/height args use the same convention as the legacy renderPanel:
-// they are the values passed to the lipgloss style's Width/Height. The
-// rendered box will have visual size width+borderWidth by height+borderHeight.
-// The title is injected into the top border line (lazygit style).
+// border (via injectTitle), not as an interior content line, freeing the
+// entire interior height for actual list/diff content. width/height are
+// the values passed to lipgloss's Width/Height; the rendered box has
+// visual size width+borderWidth by height+borderHeight.
 func renderTitledPanel(focused bool, width, height int, num, title, content string) string {
 	s := unfocusedPanelStyle
 	if focused {

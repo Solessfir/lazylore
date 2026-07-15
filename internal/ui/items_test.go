@@ -36,10 +36,6 @@ func TestScrollWindowStart_ClampsAtTheEndOfTheList(t *testing.T) {
 }
 
 func TestRenderListWindow_NeverLeavesABlankRowMidList(t *testing.T) {
-	// Regression: bubbles/list.Model's own paginated View() pads a short
-	// PAGE with blank filler lines even when more real items exist just
-	// below the page boundary - reported as a stray blank row between two
-	// real rows, far from the actual end of a 92-row Files tree.
 	items := make([]list.Item, 20)
 	for i := range items {
 		items[i] = fileItem{path: fmt.Sprintf("file%02d.txt", i), label: fmt.Sprintf("file%02d.txt", i)}
@@ -99,10 +95,9 @@ func TestFileNameStyle_StagedIsGreenUnstagedIsUncolored(t *testing.T) {
 	if got := fileNameStyle(true).GetForeground(); got != fileStagedColor {
 		t.Fatalf("staged filename foreground = %v, want %v (green)", got, fileStagedColor)
 	}
-	// Unstaged/untracked filenames are left uncolored (matches lazygit: only
-	// the status letter is colored, the filename stays in the default text
-	// color) - GetForeground on a style with no Foreground() call returns
-	// lipgloss.NoColor{}.
+	// Unstaged/untracked filenames stay uncolored - only the status letter
+	// is colored. GetForeground on a style with no Foreground() call
+	// returns lipgloss.NoColor{}.
 	if got := fileNameStyle(false).GetForeground(); got != (lipgloss.NoColor{}) {
 		t.Fatalf("unstaged filename foreground = %v, want no color set", got)
 	}
@@ -122,10 +117,6 @@ func TestFileDelegate_RenderColorsStatusLetterButNotUnstagedName(t *testing.T) {
 }
 
 func TestFileDelegate_RenderClipsUnselectedLongLabelToPanelWidth(t *testing.T) {
-	// Regression: unselected rows had no width constraint at all - a long
-	// label (or deep indent) overflowed straight past the Files panel's
-	// right border into whatever panel sits beside it on the same terminal
-	// row, corrupting that row's rendering across the whole layout.
 	item := fileItem{
 		path:   "Content/Sus/Blueprints/BP_PlayerController.uasset",
 		label:  "Content/Sus/Blueprints/BP_PlayerController.uasset",

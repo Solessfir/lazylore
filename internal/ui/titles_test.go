@@ -9,11 +9,8 @@ import (
 )
 
 func TestWithBottomCount_PreservesBorderColor(t *testing.T) {
-	// Regression: withBottomCount used to rebuild the bottom border from
-	// plain, unstyled runes, silently dropping the ANSI color/bold every
-	// other border segment carries. Force a real color profile - under
-	// `go test`'s non-tty default, color output is stripped entirely and
-	// this bug would pass invisibly.
+	// Force a real color profile - under `go test`'s non-tty default, color
+	// output is stripped entirely and a missing style would pass invisibly.
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	defer lipgloss.SetColorProfile(prev)
@@ -51,9 +48,6 @@ func TestWithScrollbar_NoOpWhenNothingToScroll(t *testing.T) {
 }
 
 func TestWithScrollbar_ThumbReplacesBorderCellInsteadOfAddingAColumn(t *testing.T) {
-	// Regression: an earlier version appended the bar as an extra column
-	// past the right border ("│▐") - lazygit merges the thumb directly into
-	// the border column instead, same overall width throughout.
 	p := renderTitledPanel(false, 20, 5, "2", "Files", "M a.go\nM b.go\nM c.go\nM d.go\nM e.go")
 	origWidth := lipgloss.Width(strings.Split(p, "\n")[1])
 
