@@ -16,7 +16,12 @@ const (
 	focusBranches
 	focusHistory
 	focusDiff
+	focusCommandLog
 )
+
+// focusPanelCount is the number of cyclable panels (Tab/Shift+Tab wrap
+// through all of them, including Command Log).
+const focusPanelCount = 6
 
 type promptKind int
 
@@ -57,13 +62,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "tab", "l":
-		m.focus = (m.focus + 1) % 5
+		m.focus = (m.focus + 1) % focusPanelCount
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
 		return m, (&m).ensureMainContent()
 
 	case "shift+tab", "h":
-		m.focus = (m.focus + 4) % 5
+		m.focus = (m.focus + focusPanelCount - 1) % focusPanelCount
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
 		return m, (&m).ensureMainContent()
@@ -93,6 +98,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, (&m).ensureMainContent()
 	case "5":
 		m.focus = focusDiff
+		m.syncFocusDelegates()
+		(&m).recomputePanelHeights()
+		return m, nil
+	case "6":
+		m.focus = focusCommandLog
 		m.syncFocusDelegates()
 		(&m).recomputePanelHeights()
 		return m, nil

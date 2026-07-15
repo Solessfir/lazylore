@@ -298,10 +298,17 @@ func (m Model) View() string {
 
 	// Right column: Diff on top, Command Log directly below it (matching lazygit
 	// "extras" panel placement under the main content, not spanning full width).
+	// Focusing Command Log expands it to take over Diff's space entirely,
+	// matching lazygit's own extras-panel behavior - hiding rather than
+	// merely resizing Diff, since there's nothing useful to show it shrunk.
 	diffW := m.diff.vp.Width + 1
-	diffPanel := renderTitledPanel(m.focus == focusDiff, diffW, effDiffH, "5", m.mainPanelTitle(), m.diff.viewWithScrollbar())
+	logCommandLogFocused := m.focus == focusCommandLog
 
-	logInnerH := max(0, commandLogPanelHeight-borderHeight)
+	logOuterH := commandLogPanelHeight
+	if logCommandLogFocused {
+		logOuterH = effDiffH + borderHeight + commandLogPanelHeight
+	}
+	logInnerH := max(0, logOuterH-borderHeight)
 	logContent := m.log.LastLines(logInnerH)
 	logContent = strings.TrimLeft(logContent, "\n\r")
 	// Blank-line trim inside titled panel too (for consistency with other panels).
@@ -312,9 +319,15 @@ func (m Model) View() string {
 		}
 		logContent = strings.Join(lines, "\n")
 	}
-	logPanel := renderTitledPanel(false, diffW, logInnerH, "", "Command Log", logContent)
+	logPanel := renderTitledPanel(logCommandLogFocused, diffW, logInnerH, "6", "Command Log", logContent)
 
-	right := lipgloss.JoinVertical(lipgloss.Left, diffPanel, logPanel)
+	var right string
+	if logCommandLogFocused {
+		right = logPanel
+	} else {
+		diffPanel := renderTitledPanel(m.focus == focusDiff, diffW, effDiffH, "5", m.mainPanelTitle(), m.diff.viewWithScrollbar())
+		right = lipgloss.JoinVertical(lipgloss.Left, diffPanel, logPanel)
+	}
 	main := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	debugDumpLayout(m, main, false)
 

@@ -331,7 +331,9 @@ func (m Model) handleMouseWheel(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	// Right side: only the Diff viewport actually scrolls (Command Log has
 	// no independent scroll position yet - see handleMouseClick's own note).
-	if y >= l.diffBoxTop+1 && y < l.diffAreaEnd-1 {
+	// Nothing to do here at all while Command Log is focused/expanded -
+	// Diff isn't even on screen then (see View()).
+	if m.focus != focusCommandLog && y >= l.diffBoxTop+1 && y < l.diffAreaEnd-1 {
 		relY := y - (l.diffBoxTop + 1)
 		relX := x - (l.diffBoxLeft + 1)
 		if relY >= 0 && relY < l.effDiffH {
@@ -441,22 +443,29 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+	} else if m.focus == focusCommandLog {
+		// Command Log is currently focused, which expands it to fill the
+		// entire right column (see View()) - there's no Diff area on
+		// screen at all to hit-test, the whole side is Command Log.
+		newFocus = focusCommandLog
 	} else {
 		// Right side: Diff (top) + Command Log (directly below it)
-		newFocus = focusDiff
 		diffBoxLeft := leftW
 		diffBoxTop := 0
 		diffAreaEnd := diffBoxTop + diffH
-		if y >= diffBoxTop+1 && y < diffAreaEnd-1 {
-			relY := y - (diffBoxTop + 1)
-			relX := x - (diffBoxLeft + 1)
-			if relY >= 0 && relY < effDiffH {
-				mm := tea.MouseMsg{X: relX, Y: relY, Button: msg.Button, Action: msg.Action}
-				m.diff.vp, cmd = m.diff.vp.Update(mm)
+		if y >= diffAreaEnd {
+			newFocus = focusCommandLog
+		} else {
+			newFocus = focusDiff
+			if y >= diffBoxTop+1 && y < diffAreaEnd-1 {
+				relY := y - (diffBoxTop + 1)
+				relX := x - (diffBoxLeft + 1)
+				if relY >= 0 && relY < effDiffH {
+					mm := tea.MouseMsg{X: relX, Y: relY, Button: msg.Button, Action: msg.Action}
+					m.diff.vp, cmd = m.diff.vp.Update(mm)
+				}
 			}
 		}
-		// Clicks inside the command log area (below diffH) are intentionally
-		// not forwarded (log is not a scrollable viewport yet).
 	}
 
 	if newFocus != m.focus {
@@ -753,7 +762,7 @@ const (
 // command log panel placed directly below the Diff on the right side only.
 // This matches lazygit where the "extras" / command log lives under the main
 // (diff) window rather than spanning under the entire left+right area.
-const commandLogPanelHeight = 5
+const commandLogPanelHeight = 10
 
 // resize propagates the terminal size to every sub-widget: a Status panel
 // plus stacked lists on the left (Files/Branches/History), the diff
@@ -918,10 +927,11 @@ func (m Model) currentFooter() string {
 // when the focused panel has no meaningful content selected (a directory
 // in Files, an empty list).
 func (m *Model) ensureMainContent() tea.Cmd {
-	// Status has no main-panel content of its own (matches lazygit - it's
-	// not one of the contexts that drives the main view), so focusing it
-	// must not overwrite what mainPanelTitle/the diff panel still shows.
-	if m.focus != focusDiff && m.focus != focusStatus {
+	// Status/Command Log have no main-panel content of their own (matches
+	// lazygit - they're not contexts that drive the main view), so
+	// focusing either must not overwrite what mainPanelTitle/the diff
+	// panel still shows.
+	if m.focus != focusDiff && m.focus != focusStatus && m.focus != focusCommandLog {
 		m.mainContentSource = m.focus
 	}
 	switch m.focus {

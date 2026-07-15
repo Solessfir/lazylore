@@ -72,10 +72,10 @@ func TestModel_TwoKeyJumpsToFiles(t *testing.T) {
 	}
 }
 
-func TestModel_TabCyclesThroughAllFivePanelsIncludingStatus(t *testing.T) {
+func TestModel_TabCyclesThroughAllSixPanelsIncludingStatus(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	m.focus = focusStatus // NewModel defaults to focusFiles - start from a known point
-	order := []focusPanel{focusStatus, focusFiles, focusBranches, focusHistory, focusDiff, focusStatus}
+	order := []focusPanel{focusStatus, focusFiles, focusBranches, focusHistory, focusDiff, focusCommandLog, focusStatus}
 	for i := 1; i < len(order); i++ {
 		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
 		m = updated.(Model)
@@ -90,8 +90,8 @@ func TestModel_ShiftTabCyclesBackwardThroughStatus(t *testing.T) {
 	m.focus = focusStatus
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
 	m2 := updated.(Model)
-	if m2.focus != focusDiff {
-		t.Fatalf("focus = %v, want focusDiff (wrapped backward from Status)", m2.focus)
+	if m2.focus != focusCommandLog {
+		t.Fatalf("focus = %v, want focusCommandLog (wrapped backward from Status)", m2.focus)
 	}
 }
 
@@ -134,6 +134,26 @@ func TestModel_MouseClickOnStatusAreaFocusesStatus(t *testing.T) {
 	m2 := updated.(Model)
 	if m2.focus != focusStatus {
 		t.Fatalf("focus = %v, want focusStatus after clicking the Status area", m2.focus)
+	}
+}
+
+func TestModel_SixKeyFocusesCommandLogAndExpandsItOverDiff(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.width, m.height = 100, 40
+	(&m).resize()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	m2 := updated.(Model)
+	if m2.focus != focusCommandLog {
+		t.Fatalf("focus = %v, want focusCommandLog", m2.focus)
+	}
+
+	out := m2.View()
+	if strings.Contains(out, "╭─[5]─") {
+		t.Fatalf("Diff panel border ([5]) should not appear while Command Log is expanded, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Command Log") {
+		t.Fatal("expected the Command Log title to still be present")
 	}
 }
 
