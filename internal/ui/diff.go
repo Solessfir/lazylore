@@ -34,6 +34,8 @@ func newDiffModel(width, height int) diffModel {
 }
 
 func (m *diffModel) SetContent(text string) {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "")
 	colored := colorizeDiff(text)
 	m.totalLines = len(strings.Split(colored, "\n"))
 	m.vp.SetContent(colored)
