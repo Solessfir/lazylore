@@ -122,6 +122,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Focus()
 		return m, textinput.Blink
 
+	case "p":
+		return m, tea.Batch(
+			func() tea.Msg { return setAppStatusMsg("Pulling...") },
+			pullCmd(m.runner),
+		)
+
+	case "P":
+		return m, tea.Batch(
+			func() tea.Msg { return setAppStatusMsg("Pushing...") },
+			pushCmd(m.runner),
+		)
+
 	case "n":
 		m.prompt = promptNewBranch
 		m.input = textinput.New()

@@ -214,6 +214,17 @@ func Commit(r Runner, message string) (Result, error) {
 	return runChecked(r, "commit", message)
 }
 
+// Pull syncs the current branch to its latest remote state - `lore sync`
+// with no revision and --remote, lore's closest equivalent to git pull.
+func Pull(r Runner) (Result, error) {
+	return runChecked(r, "sync", "--remote")
+}
+
+// Push pushes the current branch's commits to remote.
+func Push(r Runner) (Result, error) {
+	return runChecked(r, "push")
+}
+
 func SwitchBranch(r Runner, name string) (Result, error) {
 	return runChecked(r, "branch", "switch", name)
 }

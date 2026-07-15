@@ -265,6 +265,22 @@ func commitCmd(r lore.Runner, message string) tea.Cmd {
 	}
 }
 
+func pullCmd(r lore.Runner) tea.Cmd {
+	return func() tea.Msg {
+		rr := &runRecorder{inner: r}
+		_, err := lore.Pull(rr)
+		return actionDoneMsg{label: "Pull", err: err, commands: rr.commands}
+	}
+}
+
+func pushCmd(r lore.Runner) tea.Cmd {
+	return func() tea.Msg {
+		rr := &runRecorder{inner: r}
+		_, err := lore.Push(rr)
+		return actionDoneMsg{label: "Push", err: err, commands: rr.commands}
+	}
+}
+
 func switchBranchCmd(r lore.Runner, name string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
