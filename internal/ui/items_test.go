@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -67,6 +68,44 @@ func TestFileDelegate_RenderColorsStatusLetterButNotUnstagedName(t *testing.T) {
 
 	if !bytes.Contains(buf.Bytes(), []byte("hello.txt")) {
 		t.Fatalf("rendered output missing the filename: %q", out)
+	}
+}
+
+func TestFileDelegate_RenderClipsUnselectedLongLabelToPanelWidth(t *testing.T) {
+	// Regression: unselected rows had no width constraint at all - a long
+	// label (or deep indent) overflowed straight past the Files panel's
+	// right border into whatever panel sits beside it on the same terminal
+	// row, corrupting that row's rendering across the whole layout.
+	item := fileItem{
+		path:   "Content/Sus/Blueprints/BP_PlayerController.uasset",
+		label:  "Content/Sus/Blueprints/BP_PlayerController.uasset",
+		isDir:  true,
+		change: lore.FileChange{Status: 'M'},
+	}
+	items := []list.Item{item}
+	l := list.New(items, fileDelegate{focused: false}, 20, 5)
+
+	var buf bytes.Buffer
+	fileDelegate{focused: false}.Render(&buf, l, 0, item)
+
+	if w := lipgloss.Width(buf.String()); w > 20 {
+		t.Fatalf("rendered row width = %d, want <= panel width 20; got %q", w, buf.String())
+	}
+}
+
+func TestCompactTitleDelegate_RenderClipsUnselectedLongBranchNameToPanelWidth(t *testing.T) {
+	// Same regression as fileDelegate's: lipgloss's Width() alone only pads
+	// short content, it never truncates long content, so an unselected row
+	// with no matching MaxWidth() could still overflow past the panel.
+	item := branchItem{branch: lore.Branch{Name: strings.Repeat("a-very-long-branch-name-", 5)}}
+	items := []list.Item{item}
+	l := list.New(items, compactTitleDelegate{focused: false, width: 20}, 20, 5)
+
+	var buf bytes.Buffer
+	compactTitleDelegate{focused: false, width: 20}.Render(&buf, l, 0, item)
+
+	if w := lipgloss.Width(buf.String()); w > 20 {
+		t.Fatalf("rendered row width = %d, want <= panel width 20; got %q", w, buf.String())
 	}
 }
 

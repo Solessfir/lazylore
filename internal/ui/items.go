@@ -113,12 +113,21 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	selected := d.focused && index == m.Index()
 
 	if !selected {
+		// Clip to the panel's own content width via lipgloss (ANSI-aware) -
+		// a deeply indented or long-labeled row (e.g. a compressed tree
+		// chain like "Content/Sus/Blueprints") would otherwise overflow
+		// straight past the Files panel's right border into whatever panel
+		// sits beside it on the same terminal row, corrupting that row's
+		// rendering (reported as the whole layout garbling on files with
+		// long/deep paths - the selected-row branch below already guards
+		// against this via selectedRowStyle, unselected rows didn't).
+		clip := lipgloss.NewStyle().MaxWidth(m.Width())
 		if fi.isDir {
 			arrow := "▼"
 			if fi.collapsed {
 				arrow = "▶"
 			}
-			fmt.Fprint(w, indent+arrow+" "+fi.label)
+			fmt.Fprint(w, clip.Render(indent+arrow+" "+fi.label))
 			return
 		}
 		// File, not selected: apply per-part colors (status red/green, name color for staged)
@@ -128,7 +137,7 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		if fi.locked {
 			line += " " + lockBadgeStyle(fi.lockedByMe).Render(lockBadge)
 		}
-		fmt.Fprint(w, line)
+		fmt.Fprint(w, clip.Render(line))
 		return
 	}
 
@@ -380,7 +389,7 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 			// fileDelegate pattern to ensure "full ... filled selection".
 			fmt.Fprint(w, selectedRowStyle(d.width).Render(display))
 		} else {
-			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).Render(display))
+			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).Render(display))
 		}
 		return
 	}
@@ -433,7 +442,7 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 		if selected {
 			fmt.Fprint(w, selectedRowStyle(d.width).Render(display))
 		} else {
-			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).Render(display))
+			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).Render(display))
 		}
 		return
 	}
@@ -446,6 +455,6 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 	if selected {
 		fmt.Fprint(w, selectedRowStyle(d.width).Render(title))
 	} else {
-		fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).Render(title))
+		fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).Render(title))
 	}
 }
