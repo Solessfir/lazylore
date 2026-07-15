@@ -1,11 +1,11 @@
 # lazylore
 
-> [!WARNING]
-> This project was built with agentic AI coding (Claude).
-
 A terminal UI for [Lore](https://github.com/EpicGames/lore), Epic Games' open
 source version control system - the same relationship
 [lazygit](https://github.com/jesseduffield/lazygit) has to `git`.
+
+> [!WARNING]
+> This project was built with agentic AI coding (Claude).
 
 ## Status
 
