@@ -11,6 +11,23 @@ import (
 	"lazylore/internal/lore"
 )
 
+func TestModel_ResizeLeavesAtLeastOneColumnOfMargin(t *testing.T) {
+	// Regression: panel widths used to sum to exactly m.width with zero
+	// margin - at that exact fit, a single-column width mismatch anywhere
+	// (a terminal's own edge-of-screen wrap behavior, or a glyph like
+	// ▼/✓/█ rendering one column wider than lipgloss counts it) wrapped a
+	// row and cascaded a visual shift through every panel below it.
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 141, Height: 40})
+	m2 := updated.(Model)
+
+	leftOuter := m2.panelWidth + borderWidth
+	rightOuter := m2.diff.vp.Width + 1 + borderWidth // +1 for the scrollbar column
+	if total := leftOuter + rightOuter; total >= 141 {
+		t.Fatalf("left+right outer width = %d, want strictly less than terminal width 141 (some margin)", total)
+	}
+}
+
 func TestModel_SetAppStatusMsgDoesNotShowSpinnerImmediately(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, cmd := m.Update(setAppStatusMsg("Staging..."))

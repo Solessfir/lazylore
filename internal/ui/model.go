@@ -653,7 +653,18 @@ const commandLogPanelHeight = 5
 // a fixed-height status box) instead of silently losing a row or two to
 // integer-division truncation, which left this layout visibly misaligned.
 func (m *Model) resize() {
-	widths := distributeSpace([]layoutBox{{Weight: 1}, {Weight: 2}}, m.width)
+	// Reserve 1 column of slack instead of filling the terminal to its
+	// exact last column. At an exact fit (panel widths summing to exactly
+	// m.width), a single-column mismatch anywhere - a terminal's own
+	// edge-of-screen auto-wrap behavior, or a glyph this UI uses (▼/▶
+	// tree arrows, ✓, the █ scrollbar thumb) rendering one column wider
+	// in some terminal/font than lipgloss counts it - wraps that row and
+	// visually cascades a shift through every panel below it. Confirmed
+	// via debug logging: reported-corrupted rows measured well under
+	// their panel's own content width, but the two panels' widths summed
+	// to exactly the terminal's reported width with zero margin.
+	usableWidth := max(0, m.width-1)
+	widths := distributeSpace([]layoutBox{{Weight: 1}, {Weight: 2}}, usableWidth)
 	leftWidth := widths[0]
 	rightWidth := widths[1]
 
