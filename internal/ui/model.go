@@ -610,6 +610,35 @@ func (m *Model) setDirStagedByPrefix(dirPath string, from, to bool) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
+
+	// Directory rows carry their own allStaged flag (fileTreeNode.allStaged,
+	// see computeAllStaged) for the folder's green fill - recompute it here
+	// too from the leaves just flipped above, or every directory under
+	// dirPath stays visibly stale (unstaged color) until the next refresh
+	// lands, even though its files already flipped.
+	items = m.files.Items()
+	for i, it := range items {
+		fi, ok := it.(fileItem)
+		if !ok || !fi.isDir {
+			continue
+		}
+		allStaged, sawFile := true, false
+		for _, other := range items {
+			ofi, ok := other.(fileItem)
+			if !ok || ofi.isDir || !dirPrefixMatches(fi.path, ofi.change.Path) {
+				continue
+			}
+			sawFile = true
+			if !ofi.staged {
+				allStaged = false
+				break
+			}
+		}
+		fi.allStaged = allStaged && sawFile
+		if cmd := m.files.SetItem(i, fi); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	return tea.Batch(cmds...)
 }
 
