@@ -517,6 +517,18 @@ func (m *Model) openHelp() {
 	m.helpCursor = firstSelectable(m.helpRows)
 }
 
+// logResult records an actionDoneMsg's outcome in the Command Log: a live-
+// streamed action (see pushStreamCmd) already has its entry open from
+// BeginLive and just needs FinishLive, everything else gets a normal
+// AppendAction.
+func (m *Model) logResult(msg actionDoneMsg) {
+	if msg.liveStreamed {
+		m.log.FinishLive(msg.commands, msg.err)
+		return
+	}
+	m.log.AppendAction(msg.label, msg.commands, msg.err)
+}
+
 // clearAppStatus hides the spinner/status line and bumps statusGen so any
 // delayed reveal still in flight for the action that just finished (see
 // statusRevealDelay) gets dropped instead of flashing on screen after the
@@ -1197,6 +1209,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case pushChanMsg:
+		switch inner := msg.inner.(type) {
+		case pushLineMsg:
+			m.log.AppendLiveLine(string(inner))
+			return m, readPushChan(msg.ch)
+		case actionDoneMsg:
+			return m.Update(inner)
+		}
+		return m, nil
+
 	case actionDoneMsg:
 		(&m).clearAppStatus()
 		m.branchSyncLabel = ""
@@ -1208,10 +1230,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.revert != nil {
 				msg.revert(&m)
 			}
-			// Command Log already shows this error (AppendAction below) -
-			// don't also set m.err, or it'd duplicate into the footer via
+			// Command Log already shows this error (logResult below) - don't
+			// also set m.err, or it'd duplicate into the footer via
 			// currentFooter().
-			m.log.AppendAction(msg.label, msg.commands, msg.err)
+			(&m).logResult(msg)
 			return m, nil
 		}
 		if msg.confirm != nil {
@@ -1220,10 +1242,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pendingCommitAfterStageAll && msg.opKey == "stage:." {
 			m.pendingCommitAfterStageAll = false
 			(&m).openCommitPrompt()
-			m.log.AppendAction(msg.label, msg.commands, nil)
+			(&m).logResult(msg)
 			return m, tea.Batch(refreshCmd(m.runner), textinput.Blink)
 		}
-		m.log.AppendAction(msg.label, msg.commands, nil)
+		(&m).logResult(msg)
 		if len(m.pendingFileOps) > 0 {
 			// Another file op (e.g. staging one file, then the whole folder
 			// before the first call returned) is still in flight. Refreshing

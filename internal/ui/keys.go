@@ -140,11 +140,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		)
 
 	case "P":
+		m.log.BeginLive("Push")
 		m.syncGen++
 		gen := m.syncGen
 		return m, tea.Batch(
 			tea.Tick(statusRevealDelay, func(time.Time) tea.Msg { return revealSyncMsg{gen: gen, label: "Pushing"} }),
-			pushCmd(m.runner),
+			pushStreamCmd(m.runner),
 		)
 
 	case "n":

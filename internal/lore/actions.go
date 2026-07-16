@@ -37,6 +37,56 @@ func runChecked(r Runner, args ...string) (Result, error) {
 	return res, nil
 }
 
+// runCheckedStream is runChecked, plus onEvent is called for each --json
+// event line as it arrives (not just once at the end) - for commands like
+// push where a caller wants to show progress live rather than only a
+// final result. r must implement StreamRunner (ExecRunner does; a Runner
+// that doesn't falls back to runChecked with no live callback).
+func runCheckedStream(r Runner, onEvent func(tagName string, data json.RawMessage), args ...string) (Result, error) {
+	sr, ok := r.(StreamRunner)
+	if !ok {
+		return runChecked(r, args...)
+	}
+	fullArgs := append([]string{"--json"}, args...)
+	res, err := sr.RunStream(func(line string) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			return
+		}
+		var e event
+		if json.Unmarshal([]byte(line), &e) == nil && onEvent != nil {
+			onEvent(e.TagName, e.Data)
+		}
+	}, fullArgs...)
+	if err != nil {
+		return res, err
+	}
+
+	events, err := parseEvents(res.Stdout)
+	if err != nil {
+		return res, fmt.Errorf("lore %s: %w", strings.Join(args, " "), err)
+	}
+	complete, err := findComplete(events)
+	if err != nil {
+		return res, fmt.Errorf("lore %s: %w", strings.Join(args, " "), err)
+	}
+	if complete.Status != 0 {
+		msg := complete.Error.Message
+		if msg == "" {
+			msg = strings.TrimSpace(res.Stderr)
+		}
+		return res, fmt.Errorf("lore %s: %s", strings.Join(args, " "), msg)
+	}
+	return res, nil
+}
+
+// PushStream is Push, but calls onEvent with each --json event as the
+// push command emits it, for live Command Log progress (see
+// FormatPushEventLine).
+func PushStream(r Runner, onEvent func(tagName string, data json.RawMessage)) (Result, error) {
+	return runCheckedStream(r, onEvent, "push")
+}
+
 func GetStatus(r Runner) (Status, error) {
 	res, err := runChecked(r, "status", "--scan")
 	if err != nil {
@@ -218,11 +268,6 @@ func Commit(r Runner, message string) (Result, error) {
 // with no revision and --remote, lore's closest equivalent to git pull.
 func Pull(r Runner) (Result, error) {
 	return runChecked(r, "sync", "--remote")
-}
-
-// Push pushes the current branch's commits to remote.
-func Push(r Runner) (Result, error) {
-	return runChecked(r, "push")
 }
 
 func SwitchBranch(r Runner, name string) (Result, error) {

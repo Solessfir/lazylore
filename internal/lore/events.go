@@ -68,6 +68,73 @@ type completeEventData struct {
 // endpoint available") from a background remote-availability check that
 // fails when offline. The primary operation's terminal event comes first;
 // anything after it is auxiliary.
+// Push event payloads, confirmed against lore's real event schema
+// (lore-revision/src/branch/push.rs's LoreBranchPush*EventData structs) and
+// the CLI's own println formatting for them
+// (lore-client/src/cli/commands/branch.rs's handle_branch_push) - a subset
+// of the tagNames a --json push actually emits (skips the per-revision
+// update/create bookkeeping events, which are noise for a Command Log line
+// but real for the CLI's own verbose printing).
+type pushEventData struct {
+	BranchName           string `json:"branchName"`
+	LocalHistory         uint64 `json:"localHistory"`
+	Fragments            uint64 `json:"fragments"`
+	BytesTransferred     uint64 `json:"bytesTransferred"`
+	NewRemoteRevision    string `json:"newRemoteRevision"`
+	OldRemoteRevision    string `json:"oldRemoteRevision"`
+	NewRemoteRevisionNum uint64 `json:"newRemoteRevisionNumber"`
+	FastForwardMerged    bool   `json:"fastForwardMerged"`
+}
+
+// FormatPushEventLine renders one push --json event as a Command Log line,
+// matching the CLI's own printed text for the same event (see
+// pushEventData). branchName carries the name across calls: only the
+// "branchPush" event actually has it (branchPushRevisionPushEnd doesn't),
+// so the caller must thread nextBranchName back in as branchName on its
+// next call, exactly like the CLI's own captured-in-a-mutex branch_name.
+// ok is false for tagNames this doesn't have a line for (event parses
+// fine but there's nothing worth showing).
+func FormatPushEventLine(tagName string, data json.RawMessage, branchName string) (line, nextBranchName string, ok bool) {
+	var d pushEventData
+	switch tagName {
+	case "branchPush":
+		if err := json.Unmarshal(data, &d); err != nil {
+			return "", branchName, false
+		}
+		if d.LocalHistory > 0 {
+			return fmt.Sprintf("Local branch is %d revision(s) ahead of remote, pushing all revisions", d.LocalHistory), d.BranchName, true
+		}
+		return "", d.BranchName, false
+	case "branchPushFragmentBegin":
+		if err := json.Unmarshal(data, &d); err != nil || d.Fragments == 0 {
+			return "", branchName, false
+		}
+		return fmt.Sprintf("Pushing %d fragment(s)", d.Fragments), branchName, true
+	case "branchPushFragmentEnd":
+		if err := json.Unmarshal(data, &d); err != nil || d.Fragments == 0 {
+			return "", branchName, false
+		}
+		if d.BytesTransferred > 0 {
+			return fmt.Sprintf("Pushed %d fragment(s), %d bytes", d.Fragments, d.BytesTransferred), branchName, true
+		}
+		return fmt.Sprintf("Pushed %d fragment(s)", d.Fragments), branchName, true
+	case "branchPushRevisionPushEnd":
+		if err := json.Unmarshal(data, &d); err != nil {
+			return "", branchName, false
+		}
+		switch {
+		case d.FastForwardMerged:
+			return fmt.Sprintf("Pushed revision %d -> %s to branch %s (fast-forward merged on server, run sync to update)", d.NewRemoteRevisionNum, d.NewRemoteRevision, branchName), branchName, true
+		case d.OldRemoteRevision != d.NewRemoteRevision:
+			return fmt.Sprintf("Pushed revision %d -> %s to branch %s", d.NewRemoteRevisionNum, d.NewRemoteRevision, branchName), branchName, true
+		default:
+			return fmt.Sprintf("Revision %d -> %s already at latest of branch %s", d.NewRemoteRevisionNum, d.NewRemoteRevision, branchName), branchName, true
+		}
+	default:
+		return "", branchName, false
+	}
+}
+
 func findComplete(events []event) (completeEventData, error) {
 	for _, e := range events {
 		if e.TagName != "complete" {

@@ -3,6 +3,8 @@ package ui
 import (
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"lazylore/internal/lore"
 )
 
@@ -55,6 +57,22 @@ type actionDoneMsg struct {
 	revert   func(*Model)
 	confirm  func(*Model)
 	commands []string // actual lore command line(s) run, for the Command Log (see commandlog.go)
+	// liveStreamed marks this as the terminal message of a pushStreamCmd -
+	// its Command Log entry was already started via BeginLive and needs
+	// FinishLive, not a second AppendAction (see logResult in model.go).
+	liveStreamed bool
+}
+
+// pushLineMsg is one live progress line from pushStreamCmd (see
+// lore.FormatPushEventLine), appended to the Command Log as it arrives.
+type pushLineMsg string
+
+// pushChanMsg wraps one message read off a streaming push's channel
+// (pushLineMsg or the terminal actionDoneMsg), plus the channel itself so
+// Update can re-issue the read for the next message.
+type pushChanMsg struct {
+	ch    chan tea.Msg
+	inner tea.Msg
 }
 
 type editorDoneMsg struct {

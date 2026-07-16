@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"runtime"
@@ -117,6 +118,22 @@ func (rr *runRecorder) Run(args ...string) (lore.Result, error) {
 	}
 	rr.commands = append(rr.commands, "lore "+strings.Join(display, " "))
 	return res, err
+}
+
+// RunStream makes runRecorder itself satisfy lore.StreamRunner, delegating
+// to inner's own RunStream when it has one (ExecRunner does) and falling
+// back to a plain Run otherwise (FakeRunner, in tests) - runCheckedStream
+// only streams live when the Runner it's actually given supports it.
+func (rr *runRecorder) RunStream(onLine func(string), args ...string) (lore.Result, error) {
+	display := args
+	if len(display) > 0 && display[0] == "--json" {
+		display = display[1:]
+	}
+	rr.commands = append(rr.commands, "lore "+strings.Join(display, " "))
+	if sr, ok := rr.inner.(lore.StreamRunner); ok {
+		return sr.RunStream(onLine, args...)
+	}
+	return rr.inner.Run(args...)
 }
 
 func lockToggleCmd(r lore.Runner, path string, locked bool) tea.Cmd {
@@ -273,11 +290,38 @@ func pullCmd(r lore.Runner) tea.Cmd {
 	}
 }
 
-func pushCmd(r lore.Runner) tea.Cmd {
-	return func() tea.Msg {
+// pushStreamCmd runs push in a goroutine and feeds each formatted progress
+// line (see lore.FormatPushEventLine) to the Command Log as it arrives,
+// instead of only showing a result once the whole push finishes - matching
+// lazygit's own live command output. The channel is read one message at a
+// time via readPushChan/pushChanMsg (see Update's handling of it), which
+// re-issues the read after every line until the final actionDoneMsg closes
+// the channel.
+func pushStreamCmd(r lore.Runner) tea.Cmd {
+	ch := make(chan tea.Msg, 64)
+	go func() {
 		rr := &runRecorder{inner: r}
-		_, err := lore.Push(rr)
-		return actionDoneMsg{label: "Push", err: err, commands: rr.commands}
+		branchName := ""
+		_, err := lore.PushStream(rr, func(tagName string, data json.RawMessage) {
+			line, next, ok := lore.FormatPushEventLine(tagName, data, branchName)
+			branchName = next
+			if ok {
+				ch <- pushLineMsg(line)
+			}
+		})
+		ch <- actionDoneMsg{label: "Push", err: err, commands: rr.commands, liveStreamed: true}
+		close(ch)
+	}()
+	return readPushChan(ch)
+}
+
+func readPushChan(ch chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return pushChanMsg{ch: ch, inner: msg}
 	}
 }
 
