@@ -2,10 +2,12 @@ package ui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -37,13 +39,13 @@ func loadHistoryCmd(r lore.Runner) tea.Cmd {
 // enriches it (see enrichFileDiffText) with lock ownership and a real
 // filename on lore's otherwise-bare binary-diff marker. lock/locked come
 // from the caller's already-loaded m.locks - not re-fetched here.
-func loadDiffCmd(r lore.Runner, path string, lock lore.Lock, locked bool) tea.Cmd {
+func loadDiffCmd(r lore.Runner, path string, lock lore.Lock, locked bool, request mainContentRequest) tea.Cmd {
 	return func() tea.Msg {
 		text, err := lore.Diff(r, path)
 		if err != nil {
-			return diffMsg{err: err}
+			return diffMsg{request: request, err: err}
 		}
-		return diffMsg{text: enrichFileDiffText(text, path, lock, locked)}
+		return diffMsg{request: request, text: enrichFileDiffText(text, path, lock, locked)}
 	}
 }
 
@@ -71,26 +73,26 @@ func loadCurrentUserCmd(r lore.Runner) tea.Cmd {
 
 // loadBranchLogCmd fills the main panel with branch's revision log, for
 // when the Branches panel is focused.
-func loadBranchLogCmd(r lore.Runner, branch string) tea.Cmd {
+func loadBranchLogCmd(r lore.Runner, branch string, request mainContentRequest) tea.Cmd {
 	return func() tea.Msg {
 		revisions, err := lore.HistoryForBranch(r, branch, 50)
 		if err != nil {
-			return diffMsg{err: err}
+			return diffMsg{request: request, err: err}
 		}
-		return diffMsg{text: formatBranchLog(revisions), raw: true}
+		return diffMsg{request: request, text: formatBranchLog(revisions), raw: true}
 	}
 }
 
 // loadRevisionPatchCmd fills the main panel with the selected revision's
 // full patch. Callers pass parent == "" for the root revision - it has no
 // parent to diff against, so this skips the call rather than guess.
-func loadRevisionPatchCmd(r lore.Runner, parent, revision string) tea.Cmd {
+func loadRevisionPatchCmd(r lore.Runner, parent, revision string, request mainContentRequest) tea.Cmd {
 	return func() tea.Msg {
 		if parent == "" {
-			return diffMsg{text: "Initial revision - no parent to diff against.", raw: true}
+			return diffMsg{request: request, text: "Initial revision - no parent to diff against.", raw: true}
 		}
 		text, err := lore.DiffRevision(r, parent, revision)
-		return diffMsg{text: text, err: err}
+		return diffMsg{request: request, text: text, err: err}
 	}
 }
 
@@ -250,8 +252,9 @@ func discardAllCmd(r lore.Runner, paths []string) tea.Cmd {
 // editorCommand resolves the user's editor the same way git tooling
 // conventionally does (VISUAL then EDITOR), falling back to a platform
 // default, and builds the exec.Cmd to open absPath with it. Env values may
-// carry extra args (e.g. "code -w"), so only the first field is the binary.
-func editorCommand(absPath string) *exec.Cmd {
+// carry quoted executable paths and extra args (for example
+// `"C:\Program Files\Code.exe" --wait`).
+func editorCommand(absPath string) (*exec.Cmd, error) {
 	editor := os.Getenv("VISUAL")
 	if editor == "" {
 		editor = os.Getenv("EDITOR")
@@ -263,15 +266,84 @@ func editorCommand(absPath string) *exec.Cmd {
 			editor = "vi"
 		}
 	}
-	fields := strings.Fields(editor)
+	fields, err := splitEditorCommand(editor)
+	if err != nil {
+		return nil, err
+	}
 	args := append(append([]string{}, fields[1:]...), absPath)
-	return exec.Command(fields[0], args...)
+	return exec.Command(fields[0], args...), nil
 }
 
 func editFileCmd(absPath string) tea.Cmd {
-	return tea.ExecProcess(editorCommand(absPath), func(err error) tea.Msg {
+	cmd, err := editorCommand(absPath)
+	if err != nil {
+		return func() tea.Msg {
+			return editorDoneMsg{err: err}
+		}
+	}
+
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return editorDoneMsg{err: err}
 	})
+}
+
+func splitEditorCommand(command string) ([]string, error) {
+	var args []string
+	var current strings.Builder
+	var quote rune
+	started := false
+	runes := []rune(command)
+
+	for index := 0; index < len(runes); index++ {
+		char := runes[index]
+		if char == '\\' && index+1 < len(runes) {
+			next := runes[index+1]
+			if next == quote || quote == 0 && (next == '\'' || next == '"' || unicode.IsSpace(next)) {
+				current.WriteRune(next)
+				started = true
+				index++
+				continue
+			}
+		}
+
+		if quote != 0 {
+			if char == quote {
+				quote = 0
+				continue
+			}
+
+			current.WriteRune(char)
+			started = true
+			continue
+		}
+
+		switch {
+		case char == '\'' || char == '"':
+			quote = char
+			started = true
+		case unicode.IsSpace(char):
+			if started {
+				args = append(args, current.String())
+				current.Reset()
+				started = false
+			}
+		default:
+			current.WriteRune(char)
+			started = true
+		}
+	}
+
+	if quote != 0 {
+		return nil, fmt.Errorf("invalid editor command: unterminated %c quote", quote)
+	}
+	if started {
+		args = append(args, current.String())
+	}
+	if len(args) == 0 {
+		return nil, fmt.Errorf("invalid editor command: empty command")
+	}
+
+	return args, nil
 }
 
 func commitCmd(r lore.Runner, message string) tea.Cmd {
@@ -306,11 +378,29 @@ func pushStreamCmd(r lore.Runner) tea.Cmd {
 			line, next, ok := lore.FormatPushEventLine(tagName, data, branchName)
 			branchName = next
 			if ok {
-				ch <- pushLineMsg(line)
+				select {
+				case ch <- pushLineMsg(line):
+				default:
+					// Progress is best-effort. Never stall lore's stdout reader
+					// just because the UI is temporarily busy or shutting down.
+				}
 			}
 		})
-		ch <- actionDoneMsg{label: "Push", err: err, commands: rr.commands, liveStreamed: true}
-		close(ch)
+		terminal := actionDoneMsg{label: "Push", err: err, commands: rr.commands, liveStreamed: true}
+		for {
+			select {
+			case ch <- terminal:
+				close(ch)
+				return
+			default:
+				// Make room by discarding the oldest progress message. The
+				// terminal result must always reach a running UI.
+				select {
+				case <-ch:
+				default:
+				}
+			}
+		}
 	}()
 	return readPushChan(ch)
 }

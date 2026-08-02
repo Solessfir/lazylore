@@ -140,6 +140,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		)
 
 	case "P":
+		if m.pushInFlight {
+			return m, nil
+		}
+
+		m.pushInFlight = true
 		m.log.BeginLive("Push")
 		m.syncGen++
 		gen := m.syncGen
@@ -257,9 +262,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, m.toggleDirCollapse(item.path)
 				}
 				lock, locked := m.locks[item.change.Path]
+				m.mainContentSource = focusFiles
+				m.currentDiffPath = item.change.Path
+				request := (&m).beginMainContentRequest(focusFiles, item.change.Path)
 				return m, tea.Batch(
 					func() tea.Msg { return setAppStatusMsg("Loading diff...") },
-					loadDiffCmd(m.runner, item.change.Path, lock, locked),
+					loadDiffCmd(m.runner, item.change.Path, lock, locked, request),
 				)
 			}
 		}
@@ -445,7 +453,7 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == "y" {
 			return m, tea.Batch(
 				func() tea.Msg { return setAppStatusMsg("Discarding all changes...") },
-				discardAllCmd(m.runner, changedPaths(m.status)),
+				discardAllCmd(m.runner, []string{"."}),
 			)
 		}
 		return m, nil

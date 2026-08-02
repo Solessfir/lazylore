@@ -1,6 +1,8 @@
 package lore_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"lazylore/internal/lore"
@@ -39,6 +41,30 @@ func TestLockStatus_NoOpOnEmptyPaths(t *testing.T) {
 	}
 	if len(fake.Calls) != 0 {
 		t.Fatalf("Calls = %+v, want no runner calls for an empty path list", fake.Calls)
+	}
+}
+
+func TestLockStatus_BatchesLargePathLists(t *testing.T) {
+	runner := &recordingSuccessRunner{}
+	paths := make([]string, 300)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("Content/%03d-%s.uasset", i, strings.Repeat("x", 180))
+	}
+
+	locks, err := lore.LockStatus(runner, paths...)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(locks) != 0 {
+		t.Fatalf("locks = %+v, want none from the success-only runner", locks)
+	}
+	if len(runner.Calls) <= 1 {
+		t.Fatalf("Calls = %d, want multiple calls for a large path list", len(runner.Calls))
+	}
+	for _, call := range runner.Calls {
+		if len(strings.Join(call, " ")) > 17*1024 {
+			t.Fatalf("command is still too large: %d bytes", len(strings.Join(call, " ")))
+		}
 	}
 }
 

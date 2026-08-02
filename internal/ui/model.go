@@ -38,6 +38,7 @@ type Model struct {
 	// gates that reveal the same way statusGen gates revealStatusMsg.
 	branchSyncLabel string
 	syncGen         int
+	pushInFlight    bool
 
 	// pendingCommitAfterStageAll: user confirmed "stage all and commit" from
 	// the promptConfirmStageAllForCommit prompt - opens the commit input
@@ -55,9 +56,10 @@ type Model struct {
 	branchesTotal int
 	historyTotal  int
 
-	currentDiffPath  string // last file path we issued a diff load for (avoids spamming loads on every cursor move)
-	currentLogBranch string // last branch we issued a Log load for (Branches panel focused)
-	currentPatchRev  string // last revision we issued a Patch load for (History panel focused)
+	currentDiffPath      string // last file path we issued a diff load for (avoids spamming loads on every cursor move)
+	currentLogBranch     string // last branch we issued a Log load for (Branches panel focused)
+	currentPatchRev      string // last revision we issued a Patch load for (History panel focused)
+	mainContentRequestID uint64
 
 	// mainContentSource is which of Files/Branches/History last populated
 	// the shared main panel, so mainPanelTitle() knows what's actually
@@ -552,6 +554,29 @@ func (m *Model) setPendingFileOp(key string, pending bool) {
 	}
 }
 
+func (m *Model) moveFileStatus(path string, fromStaged, toStaged bool) {
+	if fromStaged == toStaged {
+		return
+	}
+
+	source := &m.status.Unstaged
+	destination := &m.status.Staged
+	if fromStaged {
+		source = &m.status.Staged
+		destination = &m.status.Unstaged
+	}
+
+	for i, change := range *source {
+		if change.Path != path || change.Directory {
+			continue
+		}
+
+		*source = append((*source)[:i], (*source)[i+1:]...)
+		*destination = append(*destination, change)
+		return
+	}
+}
+
 // setFileStagedByPath flips the Files-panel row for path currently at
 // `from` staged-state to `to`, for optimistic UI: space toggles the color
 // instantly, before the actual lore stage/unstage call (see
@@ -560,6 +585,9 @@ func (m *Model) setPendingFileOp(key string, pending bool) {
 // unstaged row simultaneously (see buildFileTree) - matching staged too
 // picks the right one.
 func (m *Model) setFileStagedByPath(path string, from, to bool) tea.Cmd {
+	m.moveFileStatus(path, from, to)
+
+	var cmds []tea.Cmd
 	items := m.files.Items()
 	for i, it := range items {
 		fi, ok := it.(fileItem)
@@ -567,9 +595,13 @@ func (m *Model) setFileStagedByPath(path string, from, to bool) tea.Cmd {
 			continue
 		}
 		fi.staged = to
-		return m.files.SetItem(i, fi)
+		if cmd := m.files.SetItem(i, fi); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		break
 	}
-	return nil
+	cmds = append(cmds, m.refreshVisibleDirectoryStageState()...)
+	return tea.Batch(cmds...)
 }
 
 // setFileLockedByPath flips the lock badge on every Files-panel row for
@@ -605,22 +637,80 @@ func dirPrefixMatches(dirPath, filePath string) bool {
 	return strings.HasPrefix(filePath, dirPath+"/")
 }
 
+// changeIsInDirectory keeps a real directory change at dirPath in scope,
+// while a namesake file at that exact path remains a sibling rather than a
+// descendant. Synthetic directory rows have no corresponding FileChange.
+func changeIsInDirectory(dirPath string, change lore.FileChange) bool {
+	if dirPath == "" {
+		return true
+	}
+
+	if change.Directory && change.Path == dirPath {
+		return true
+	}
+
+	return dirPrefixMatches(dirPath, change.Path)
+}
+
+func (m *Model) moveDirectoryStatus(dirPath string, fromStaged, toStaged bool) {
+	if fromStaged == toStaged {
+		return
+	}
+
+	source := &m.status.Unstaged
+	destination := &m.status.Staged
+	if fromStaged {
+		source = &m.status.Staged
+		destination = &m.status.Unstaged
+	}
+
+	kept := (*source)[:0]
+	for _, change := range *source {
+		if changeIsInDirectory(dirPath, change) {
+			*destination = append(*destination, change)
+			continue
+		}
+
+		kept = append(kept, change)
+	}
+	*source = kept
+}
+
 // dirStageCounts reports whether any file under dirPath is currently
 // unstaged and/or staged, for toggleDirStage's lazygit-style decision
 // (stage if anything's unstaged, else unstage).
 func (m Model) dirStageCounts(dirPath string) (hasUnstaged, hasStaged bool) {
-	for _, it := range m.files.Items() {
-		fi, ok := it.(fileItem)
-		if !ok || fi.isDir || !dirPrefixMatches(dirPath, fi.change.Path) {
-			continue
-		}
-		if fi.staged {
-			hasStaged = true
-		} else {
+	for _, change := range m.status.Unstaged {
+		if changeIsInDirectory(dirPath, change) {
 			hasUnstaged = true
 		}
 	}
+
+	for _, change := range m.status.Staged {
+		if changeIsInDirectory(dirPath, change) {
+			hasStaged = true
+		}
+	}
+
 	return hasUnstaged, hasStaged
+}
+
+func (m *Model) refreshVisibleDirectoryStageState() []tea.Cmd {
+	var cmds []tea.Cmd
+	for index, item := range m.files.Items() {
+		file, ok := item.(fileItem)
+		if !ok || !file.isDir {
+			continue
+		}
+
+		hasUnstaged, hasStaged := m.dirStageCounts(file.path)
+		file.allStaged = hasStaged && !hasUnstaged
+		if cmd := m.files.SetItem(index, file); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+
+	return cmds
 }
 
 // setDirStagedByPrefix is setFileStagedByPath's recursive analog: flips
@@ -628,11 +718,13 @@ func (m Model) dirStageCounts(dirPath string) (hasUnstaged, hasStaged bool) {
 // staged as `from` over to `to`, for space on a directory/root row's
 // optimistic UI (see toggleDirStage).
 func (m *Model) setDirStagedByPrefix(dirPath string, from, to bool) tea.Cmd {
+	m.moveDirectoryStatus(dirPath, from, to)
+
 	var cmds []tea.Cmd
 	items := m.files.Items()
 	for i, it := range items {
 		fi, ok := it.(fileItem)
-		if !ok || fi.isDir || fi.staged != from || !dirPrefixMatches(dirPath, fi.change.Path) {
+		if !ok || !fi.trackedChange || fi.staged != from || !changeIsInDirectory(dirPath, fi.change) {
 			continue
 		}
 		fi.staged = to
@@ -641,34 +733,9 @@ func (m *Model) setDirStagedByPrefix(dirPath string, from, to bool) tea.Cmd {
 		}
 	}
 
-	// Directory rows carry their own allStaged flag (fileTreeNode.allStaged,
-	// see computeAllStaged) for the folder's green fill - recompute it here
-	// too from the leaves just flipped above, or every directory under
-	// dirPath stays visibly stale (unstaged color) until the next refresh
-	// lands, even though its files already flipped.
-	items = m.files.Items()
-	for i, it := range items {
-		fi, ok := it.(fileItem)
-		if !ok || !fi.isDir {
-			continue
-		}
-		allStaged, sawFile := true, false
-		for _, other := range items {
-			ofi, ok := other.(fileItem)
-			if !ok || ofi.isDir || !dirPrefixMatches(fi.path, ofi.change.Path) {
-				continue
-			}
-			sawFile = true
-			if !ofi.staged {
-				allStaged = false
-				break
-			}
-		}
-		fi.allStaged = allStaged && sawFile
-		if cmd := m.files.SetItem(i, fi); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	}
+	// Recompute folders from authoritative status rather than visible rows;
+	// collapsed directories deliberately omit their changed children.
+	cmds = append(cmds, m.refreshVisibleDirectoryStageState()...)
 	return tea.Batch(cmds...)
 }
 
@@ -948,6 +1015,26 @@ func (m Model) currentFooter() string {
 	return ""
 }
 
+func (m *Model) beginMainContentRequest(source focusPanel, target string) mainContentRequest {
+	m.mainContentRequestID++
+	return mainContentRequest{id: m.mainContentRequestID, source: source, target: target}
+}
+
+func (m *Model) clearMainContentSelection(source focusPanel) {
+	m.mainContentRequestID++
+
+	switch source {
+	case focusFiles:
+		m.currentDiffPath = ""
+	case focusBranches:
+		m.currentLogBranch = ""
+	case focusHistory:
+		m.currentPatchRev = ""
+	}
+
+	m.diff.SetContentRaw("")
+}
+
 // ensureMainContent returns a command to (re)load the shared main panel's
 // content for whatever is currently focused/selected, matching lazygit's
 // own contextual main view: Files shows the selected file's diff, Branches
@@ -968,15 +1055,13 @@ func (m *Model) ensureMainContent() tea.Cmd {
 	case focusFiles:
 		item, ok := m.files.SelectedItem().(fileItem)
 		if !ok {
+			m.clearMainContentSelection(focusFiles)
 			return nil
 		}
 		if item.isDir {
 			// Selecting a directory clears the main panel instead of leaving
 			// the last-selected file's diff stuck on screen.
-			if m.currentDiffPath != "" {
-				m.currentDiffPath = ""
-				m.diff.SetContentRaw("")
-			}
+			m.clearMainContentSelection(focusFiles)
 			return nil
 		}
 		if item.change.Path == m.currentDiffPath {
@@ -984,19 +1069,29 @@ func (m *Model) ensureMainContent() tea.Cmd {
 		}
 		m.currentDiffPath = item.change.Path
 		lock, locked := m.locks[item.change.Path]
-		return loadDiffCmd(m.runner, item.change.Path, lock, locked)
+		request := m.beginMainContentRequest(focusFiles, item.change.Path)
+		return loadDiffCmd(m.runner, item.change.Path, lock, locked, request)
 
 	case focusBranches:
 		item, ok := m.branches.SelectedItem().(branchItem)
-		if !ok || item.branch.Name == m.currentLogBranch {
+		if !ok {
+			m.clearMainContentSelection(focusBranches)
+			return nil
+		}
+		if item.branch.Name == m.currentLogBranch {
 			return nil
 		}
 		m.currentLogBranch = item.branch.Name
-		return loadBranchLogCmd(m.runner, item.branch.Name)
+		request := m.beginMainContentRequest(focusBranches, item.branch.Name)
+		return loadBranchLogCmd(m.runner, item.branch.Name, request)
 
 	case focusHistory:
 		item, ok := m.history.SelectedItem().(revisionItem)
-		if !ok || item.revision.Hash == m.currentPatchRev {
+		if !ok {
+			m.clearMainContentSelection(focusHistory)
+			return nil
+		}
+		if item.revision.Hash == m.currentPatchRev {
 			return nil
 		}
 		m.currentPatchRev = item.revision.Hash
@@ -1004,21 +1099,26 @@ func (m *Model) ensureMainContent() tea.Cmd {
 		if lore.IsZeroHash(parent) {
 			parent = ""
 		}
-		return loadRevisionPatchCmd(m.runner, parent, item.revision.Hash)
+		request := m.beginMainContentRequest(focusHistory, item.revision.Hash)
+		return loadRevisionPatchCmd(m.runner, parent, item.revision.Hash, request)
 	}
 	return nil
 }
 
-// changedPaths flattens a Status's staged and unstaged entries into a single
-// path list, for actions (like discard-all) that operate on everything at
-// once rather than one selected file.
-func changedPaths(s lore.Status) []string {
+// changedFilePaths flattens a Status's staged and unstaged file entries for
+// lock-status requests. Lore reports directory changes too, but locks apply
+// only to files.
+func changedFilePaths(s lore.Status) []string {
 	paths := make([]string, 0, len(s.Staged)+len(s.Unstaged))
 	for _, c := range s.Staged {
-		paths = append(paths, c.Path)
+		if !c.Directory {
+			paths = append(paths, c.Path)
+		}
 	}
 	for _, c := range s.Unstaged {
-		paths = append(paths, c.Path)
+		if !c.Directory {
+			paths = append(paths, c.Path)
+		}
 	}
 	return paths
 }
@@ -1132,7 +1232,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentDiffPath = ""
 		setCmd := (&m).rebuildFileItems()
 		diffCmd := (&m).ensureMainContent()
-		lockCmd := loadLocksCmd(m.runner, changedPaths(msg.status))
+		lockCmd := loadLocksCmd(m.runner, changedFilePaths(msg.status))
 		// statusMsg and historyMsg load independently and can arrive in
 		// either order; rebuild History's unpushed coloring here too so it's
 		// correct even when status lands after history already rendered.
@@ -1196,8 +1296,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, (&m).rebuildFileItems()
 
 	case diffMsg:
+		if msg.request.id != m.mainContentRequestID {
+			return m, nil
+		}
+
 		(&m).clearAppStatus()
 		if msg.err != nil {
+			switch msg.request.source {
+			case focusFiles:
+				if m.currentDiffPath == msg.request.target {
+					m.currentDiffPath = ""
+				}
+			case focusBranches:
+				if m.currentLogBranch == msg.request.target {
+					m.currentLogBranch = ""
+				}
+			case focusHistory:
+				if m.currentPatchRev == msg.request.target {
+					m.currentPatchRev = ""
+				}
+			}
+
 			m.err = msg.err
 			return m, nil
 		}
@@ -1223,6 +1342,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		(&m).clearAppStatus()
 		m.branchSyncLabel = ""
 		m.syncGen++
+		if msg.liveStreamed {
+			m.pushInFlight = false
+		}
 		if msg.opKey != "" {
 			(&m).setPendingFileOp(msg.opKey, false)
 		}

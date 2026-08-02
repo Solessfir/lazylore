@@ -325,15 +325,38 @@ func TestModel_ClickSelectsCorrectRowInScrolledFilesWindow(t *testing.T) {
 	}
 }
 
-func TestChangedPaths_CombinesStagedThenUnstaged(t *testing.T) {
+func TestChangedFilePaths_CombinesFilesAndSkipsDirectories(t *testing.T) {
 	s := lore.Status{
-		Staged:   []lore.FileChange{{Status: 'A', Path: "a.txt"}},
+		Staged: []lore.FileChange{
+			{Status: 'A', Path: "empty-dir", Directory: true},
+			{Status: 'A', Path: "a.txt"},
+		},
 		Unstaged: []lore.FileChange{{Status: 'M', Path: "b.txt"}},
 	}
-	paths := changedPaths(s)
+	paths := changedFilePaths(s)
 	want := []string{"a.txt", "b.txt"}
 	if len(paths) != len(want) || paths[0] != want[0] || paths[1] != want[1] {
-		t.Fatalf("changedPaths = %+v, want %+v", paths, want)
+		t.Fatalf("changedFilePaths = %+v, want %+v", paths, want)
+	}
+}
+
+func TestModel_DropsStaleMainContentResponse(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.mainContentRequestID = 2
+	m.diff.vp.Width = 80
+	m.diff.vp.Height = 10
+	m.diff.SetContentRaw("new selection")
+
+	updated, cmd := m.Update(diffMsg{
+		request: mainContentRequest{id: 1, source: focusFiles, target: "old.txt"},
+		text:    "stale response",
+	})
+	m2 := updated.(Model)
+	if cmd != nil {
+		t.Fatalf("stale response returned unexpected command: %v", cmd)
+	}
+	if strings.Contains(m2.diff.vp.View(), "stale response") || !strings.Contains(m2.diff.vp.View(), "new selection") {
+		t.Fatalf("diff content changed after stale response: %q", m2.diff.vp.View())
 	}
 }
 

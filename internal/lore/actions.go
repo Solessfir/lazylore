@@ -7,6 +7,39 @@ import (
 	"strings"
 )
 
+// Keep path-heavy Lore commands comfortably below Windows' command-line
+// limit. The estimate includes separators and the implicit --json argument;
+// an individual path longer than the budget is still emitted by itself so
+// the caller receives Lore's real error for it.
+const maxCommandArgumentBytes = 16 * 1024
+
+func pathArgumentBatches(prefix, paths []string) [][]string {
+	fixedBytes := len("--json") + 1
+	for _, arg := range prefix {
+		fixedBytes += len(arg) + 1
+	}
+
+	var batches [][]string
+	var batch []string
+	batchBytes := fixedBytes
+	for _, path := range paths {
+		pathBytes := len(path) + 1
+		if len(batch) > 0 && batchBytes+pathBytes > maxCommandArgumentBytes {
+			batches = append(batches, batch)
+			batch = nil
+			batchBytes = fixedBytes
+		}
+
+		batch = append(batch, path)
+		batchBytes += pathBytes
+	}
+	if len(batch) > 0 {
+		batches = append(batches, batch)
+	}
+
+	return batches
+}
+
 // runChecked runs a lore command with --json prepended, and treats the
 // output's "complete" event (see events.go) as the authoritative
 // success/failure signal - not the raw process exit code or stderr text.
@@ -222,10 +255,24 @@ func DiscardAllChanges(r Runner, paths []string) (Result, error) {
 	if len(paths) == 0 {
 		return Result{}, nil
 	}
-	if _, err := runChecked(r, append([]string{"unstage"}, paths...)...); err != nil {
-		return Result{}, err
+
+	var result Result
+	for _, batch := range pathArgumentBatches([]string{"unstage"}, paths) {
+		var err error
+		result, err = runChecked(r, append([]string{"unstage"}, batch...)...)
+		if err != nil {
+			return result, err
+		}
 	}
-	return runChecked(r, append([]string{"reset", "--purge"}, paths...)...)
+	for _, batch := range pathArgumentBatches([]string{"reset", "--purge"}, paths) {
+		var err error
+		result, err = runChecked(r, append([]string{"reset", "--purge"}, batch...)...)
+		if err != nil {
+			return result, err
+		}
+	}
+
+	return result, nil
 }
 
 // ResetBranchTo moves the current branch's latest pointer to revision -

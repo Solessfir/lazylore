@@ -28,25 +28,29 @@ func LockStatus(r Runner, paths ...string) ([]Lock, error) {
 	if len(paths) == 0 {
 		return nil, nil
 	}
-	res, err := runChecked(r, append([]string{"lock", "status"}, paths...)...)
-	if err != nil {
-		return nil, err
-	}
-	events, err := parseEvents(res.Stdout)
-	if err != nil {
-		return nil, fmt.Errorf("lore lock status: %w", err)
-	}
+
 	var locks []Lock
-	for _, e := range events {
-		if e.TagName != "lockFileStatus" {
-			continue
+	for _, batch := range pathArgumentBatches([]string{"lock", "status"}, paths) {
+		res, err := runChecked(r, append([]string{"lock", "status"}, batch...)...)
+		if err != nil {
+			return nil, err
 		}
-		var data lockFileStatusData
-		if err := json.Unmarshal(e.Data, &data); err != nil {
-			return nil, fmt.Errorf("parsing lockFileStatus event: %w", err)
+		events, err := parseEvents(res.Stdout)
+		if err != nil {
+			return nil, fmt.Errorf("lore lock status: %w", err)
 		}
-		locks = append(locks, Lock{Path: data.Path, Owner: data.Owner, LockedAt: data.LockedAt})
+		for _, e := range events {
+			if e.TagName != "lockFileStatus" {
+				continue
+			}
+			var data lockFileStatusData
+			if err := json.Unmarshal(e.Data, &data); err != nil {
+				return nil, fmt.Errorf("parsing lockFileStatus event: %w", err)
+			}
+			locks = append(locks, Lock{Path: data.Path, Owner: data.Owner, LockedAt: data.LockedAt})
+		}
 	}
+
 	return locks, nil
 }
 

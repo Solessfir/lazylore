@@ -710,10 +710,10 @@ func TestModel_ShiftDOnFilesOpensDiscardAllConfirmPrompt(t *testing.T) {
 	}
 }
 
-func TestModel_YKeyConfirmsDiscardAllForEveryChangedPath(t *testing.T) {
+func TestModel_YKeyConfirmsDiscardAllAtRepositoryRoot(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage a.txt b.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
-		"--json reset --purge a.txt b.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json unstage .":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge .": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{
@@ -751,8 +751,8 @@ func TestModel_YKeyConfirmsDiscardAllForEveryChangedPath(t *testing.T) {
 	if am.err != nil {
 		t.Fatalf("unexpected error: %v", am.err)
 	}
-	if len(fake.Calls) != 2 || fake.Calls[0][1] != "unstage" || fake.Calls[1][1] != "reset" {
-		t.Fatalf("Calls = %+v, want unstage then reset --purge across both paths", fake.Calls)
+	if len(fake.Calls) != 2 || strings.Join(fake.Calls[0], " ") != "--json unstage ." || strings.Join(fake.Calls[1], " ") != "--json reset --purge ." {
+		t.Fatalf("Calls = %+v, want unstage then reset --purge at repository root", fake.Calls)
 	}
 }
 
@@ -1274,5 +1274,120 @@ func TestModel_CollapsedDirectoryHidesItsFiles(t *testing.T) {
 
 	if len(m3.files.Items()) != 1 {
 		t.Fatalf("collapsed items = %+v, want just the 'src' row", m3.files.Items())
+	}
+}
+
+func TestModel_SpaceOnCollapsedDirectoryStagesHiddenFiles(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json stage src": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{
+		{Status: 'M', Path: "src/a.go"},
+		{Status: 'M', Path: "src/b.go"},
+	}}})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m3 := updated.(Model)
+	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m4 := updated.(Model)
+	runBatch(cmd)
+
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage src" {
+		t.Fatalf("Calls = %+v, want stage src despite its children being hidden", fake.Calls)
+	}
+	if hasUnstaged, hasStaged := m4.dirStageCounts("src"); hasUnstaged || !hasStaged {
+		t.Fatalf("dirStageCounts(src) = %v,%v, want false,true after optimistic stage", hasUnstaged, hasStaged)
+	}
+	item := m4.files.SelectedItem().(fileItem)
+	if !item.allStaged {
+		t.Fatal("collapsed src row should be visibly staged after its hidden files are staged")
+	}
+}
+
+func TestModel_CommitSeesStagedFilesInsideCollapsedDirectory(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Staged: []lore.FileChange{
+		{Status: 'M', Path: "src/a.go"},
+		{Status: 'M', Path: "src/b.go"},
+	}}})
+	m2 := updated.(Model)
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m3 := updated.(Model)
+	updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	m4 := updated.(Model)
+
+	if m4.prompt != promptCommit {
+		t.Fatalf("prompt = %v, want commit prompt for hidden staged files", m4.prompt)
+	}
+	if m4.err != nil {
+		t.Fatalf("unexpected error for hidden staged files: %v", m4.err)
+	}
+}
+
+func TestModel_SpaceStagesChangedEmptyDirectory(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json stage Content/Empty": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{
+		{Status: 'A', Path: "Content/Empty", Directory: true},
+	}}})
+	m2 := updated.(Model)
+
+	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeySpace})
+	runBatch(cmd)
+
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage Content/Empty" {
+		t.Fatalf("Calls = %+v, want stage Content/Empty", fake.Calls)
+	}
+}
+
+func TestModel_AKeyUsesHiddenChangesWhenDirectoryCollapsed(t *testing.T) {
+	fake := &lore.FakeRunner{Results: map[string]lore.Result{
+		"--json stage .": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+	}}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(statusMsg{status: lore.Status{
+		Staged:   []lore.FileChange{{Status: 'M', Path: "visible.txt"}},
+		Unstaged: []lore.FileChange{{Status: 'M', Path: "src/hidden.go"}},
+	}})
+	m2 := updated.(Model)
+
+	for i, item := range m2.files.Items() {
+		file := item.(fileItem)
+		if file.isDir && file.path == "src" {
+			m2.files.Select(i)
+			break
+		}
+	}
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m3 := updated.(Model)
+	_, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	runBatch(cmd)
+
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage ." {
+		t.Fatalf("Calls = %+v, want stage . because a hidden file is unstaged", fake.Calls)
+	}
+}
+
+func TestModel_SecondPushIsIgnoredWhileFirstIsRunning(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, firstCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+	m2 := updated.(Model)
+	if firstCmd == nil || !m2.pushInFlight {
+		t.Fatal("first push should start and mark a push in flight")
+	}
+	logBefore := m2.log.View()
+
+	updated, secondCmd := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+	m3 := updated.(Model)
+	if secondCmd != nil {
+		t.Fatal("second push should be ignored while the first is running")
+	}
+	if m3.log.View() != logBefore {
+		t.Fatal("second push should not replace the first live Command Log entry")
 	}
 }

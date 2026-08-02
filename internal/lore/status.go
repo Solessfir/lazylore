@@ -5,10 +5,11 @@ import (
 	"fmt"
 )
 
-// FileChange is one changed file from a lore status listing.
+// FileChange is one changed file or directory from a lore status listing.
 type FileChange struct {
-	Status byte // 'A' add, 'M' modify, 'D' delete, 'C' copy - see fileActionDisplayByte
-	Path   string
+	Status    byte // 'A' add, 'M' modify, 'D' delete, 'C' copy - see fileActionDisplayByte
+	Path      string
+	Directory bool
 }
 
 // Status is the parsed result of `lore --json status --scan`.
@@ -102,18 +103,11 @@ func ParseStatus(output string) (Status, error) {
 			if err := json.Unmarshal(e.Data, &data); err != nil {
 				return Status{}, fmt.Errorf("parsing repositoryStatusFile event: %w", err)
 			}
-			if data.Type == "directory" {
-				// lore reports directory-level changes (e.g. an added/moved
-				// folder) as their own status entries alongside the file
-				// entries for what's inside them. lazylore's Files tree is
-				// built purely from file paths (buildFileTree synthesizes
-				// directory rows from them) - keeping a directory-type entry
-				// here would insert it as a phantom leaf "file" with the same
-				// name as the real (synthesized) directory row, e.g. a stray
-				// "SonarV2" file next to the actual "SonarV2/" folder.
-				continue
+			change := FileChange{
+				Status:    fileActionDisplayByte(data.Action, data.FlagDirty),
+				Path:      data.Path,
+				Directory: data.Type == "directory",
 			}
-			change := FileChange{Status: fileActionDisplayByte(data.Action, data.FlagDirty), Path: data.Path}
 			if data.FlagStaged {
 				s.Staged = append(s.Staged, change)
 			} else {

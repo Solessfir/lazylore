@@ -120,16 +120,17 @@ func fileNameStyle(staged bool) lipgloss.Style {
 // statusToItems; collapse state is carried separately on Model so it
 // survives a refresh. label is the row's display text (see rowLabel).
 type fileItem struct {
-	path       string
-	label      string
-	isDir      bool
-	depth      int
-	change     lore.FileChange
-	staged     bool
-	allStaged  bool // only meaningful when isDir - see fileTreeNode.allStaged
-	collapsed  bool // only meaningful when isDir
-	locked     bool // only meaningful for files; lore lock held by anyone
-	lockedByMe bool // only meaningful when locked is true
+	path          string
+	label         string
+	isDir         bool
+	trackedChange bool
+	depth         int
+	change        lore.FileChange
+	staged        bool
+	allStaged     bool // only meaningful when isDir - see fileTreeNode.allStaged
+	collapsed     bool // only meaningful when isDir
+	locked        bool // only meaningful for files; lore lock held by anyone
+	lockedByMe    bool // only meaningful when locked is true
 }
 
 func (i fileItem) FilterValue() string { return i.path }
@@ -253,16 +254,17 @@ func statusToItems(s lore.Status, collapsedDirs map[string]bool, locks map[strin
 		lock, locked := locks[row.node.path]
 		lockedByMe := locked && currentUserID != "" && lock.Owner == currentUserID
 		items = append(items, fileItem{
-			path:       row.node.path,
-			label:      row.label,
-			isDir:      row.node.isDir,
-			depth:      row.depth,
-			change:     row.node.change,
-			staged:     row.node.staged,
-			allStaged:  row.node.allStaged,
-			collapsed:  collapsedDirs[row.node.path],
-			locked:     locked,
-			lockedByMe: lockedByMe,
+			path:          row.node.path,
+			label:         row.label,
+			isDir:         row.node.isDir,
+			trackedChange: row.node.hasChange,
+			depth:         row.depth,
+			change:        row.node.change,
+			staged:        row.node.staged,
+			allStaged:     row.node.allStaged,
+			collapsed:     collapsedDirs[row.node.path],
+			locked:        locked,
+			lockedByMe:    lockedByMe,
 		})
 	}
 	return items

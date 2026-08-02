@@ -2,6 +2,7 @@ package lore_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -14,6 +15,15 @@ import (
 const jsonCompleteSuccess = `{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}` + "\n"
 
 const jsonCompleteFailure = `{"tagName":"complete","data":{"status":-1,"error":{"errorCode":-1,"message":"not a lore repository","traceLocations":[]}}}` + "\n"
+
+type recordingSuccessRunner struct {
+	Calls [][]string
+}
+
+func (r *recordingSuccessRunner) Run(args ...string) (lore.Result, error) {
+	r.Calls = append(r.Calls, append([]string(nil), args...))
+	return lore.Result{Stdout: jsonCompleteSuccess}, nil
+}
 
 func TestGetStatus_ParsesSuccessfulRun(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
@@ -202,6 +212,35 @@ func TestDiscardAllChanges_NoOpOnEmptyPaths(t *testing.T) {
 	}
 	if len(fake.Calls) != 0 {
 		t.Fatalf("Calls = %+v, want no runner calls for an empty path list", fake.Calls)
+	}
+}
+
+func TestDiscardAllChanges_BatchesLargePathLists(t *testing.T) {
+	runner := &recordingSuccessRunner{}
+	paths := make([]string, 300)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("Content/%03d-%s.uasset", i, strings.Repeat("x", 180))
+	}
+
+	_, err := lore.DiscardAllChanges(runner, paths)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(runner.Calls) <= 2 {
+		t.Fatalf("Calls = %d, want more than two calls for a large path list", len(runner.Calls))
+	}
+
+	resetStarted := false
+	for _, call := range runner.Calls {
+		if len(strings.Join(call, " ")) > 17*1024 {
+			t.Fatalf("command is still too large: %d bytes", len(strings.Join(call, " ")))
+		}
+		if len(call) > 1 && call[1] == "reset" {
+			resetStarted = true
+		}
+		if resetStarted && len(call) > 1 && call[1] == "unstage" {
+			t.Fatalf("unstage call appeared after reset started: %+v", runner.Calls)
+		}
 	}
 }
 

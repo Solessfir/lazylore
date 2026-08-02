@@ -17,12 +17,13 @@ import (
 // collapse state and lock/status lookups keyed by path keep working
 // regardless of where in the (compressed) tree a node ends up rendered.
 type fileTreeNode struct {
-	name     string
-	path     string
-	isDir    bool
-	children []*fileTreeNode
-	change   lore.FileChange
-	staged   bool
+	name      string
+	path      string
+	isDir     bool
+	children  []*fileTreeNode
+	change    lore.FileChange
+	hasChange bool
+	staged    bool
 	// allStaged is only meaningful for a directory node: true when every
 	// file anywhere in its subtree is staged (set by computeAllStaged),
 	// so a directory row can render green once everything under it is staged.
@@ -49,8 +50,33 @@ func buildFileTree(s lore.Status) *fileTreeNode {
 		current := displayRoot
 		for i, part := range parts {
 			if i == len(parts)-1 {
+				if change.Directory {
+					for _, child := range current.children {
+						if child.isDir && child.name == part {
+							child.change = change
+							child.hasChange = true
+							child.staged = staged
+							return
+						}
+					}
+
+					current.children = append(current.children, &fileTreeNode{
+						name:      part,
+						path:      change.Path,
+						isDir:     true,
+						change:    change,
+						hasChange: true,
+						staged:    staged,
+					})
+					return
+				}
+
 				current.children = append(current.children, &fileTreeNode{
-					name: part, path: change.Path, staged: staged, change: change,
+					name:      part,
+					path:      change.Path,
+					change:    change,
+					hasChange: true,
+					staged:    staged,
 				})
 				return
 			}
@@ -100,28 +126,29 @@ func buildFileTree(s lore.Status) *fileTreeNode {
 }
 
 // computeAllStaged fills in every directory node's allStaged bottom-up:
-// true only when the subtree contains at least one file and every file in
-// it is staged. Returns (allStaged, sawFile) for node itself so a parent
+// true only when the subtree contains at least one change and every change
+// in it is staged. Returns (allStaged, sawChange) for node itself so a parent
 // call can fold a child directory's result in without re-walking it.
-func computeAllStaged(node *fileTreeNode) (allStaged, sawFile bool) {
+func computeAllStaged(node *fileTreeNode) (allStaged, sawChange bool) {
 	if !node.isDir {
 		return node.staged, true
 	}
-	allStaged = true
+	allStaged = !node.hasChange || node.staged
+	sawChange = node.hasChange
 	for _, c := range node.children {
-		childAllStaged, childSawFile := computeAllStaged(c)
-		if childSawFile {
-			sawFile = true
+		childAllStaged, childSawChange := computeAllStaged(c)
+		if childSawChange {
+			sawChange = true
 			if !childAllStaged {
 				allStaged = false
 			}
 		}
 	}
-	if !sawFile {
+	if !sawChange {
 		allStaged = false
 	}
 	node.allStaged = allStaged
-	return allStaged, sawFile
+	return allStaged, sawChange
 }
 
 func sortFileTree(node *fileTreeNode) {
@@ -147,7 +174,7 @@ func compressFileTree(node *fileTreeNode) *fileTreeNode {
 	children := node.children
 	for i := range children {
 		grandchildren := children[i].children
-		for len(grandchildren) == 1 && grandchildren[0].isDir {
+		for !children[i].hasChange && len(grandchildren) == 1 && grandchildren[0].isDir {
 			children[i] = grandchildren[0]
 			grandchildren = children[i].children
 		}

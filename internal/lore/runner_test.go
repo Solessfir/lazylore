@@ -1,10 +1,13 @@
 package lore_test
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"lazylore/internal/lore"
 )
@@ -54,5 +57,85 @@ func TestExecRunner_Run_BinaryNotFoundIsAnError(t *testing.T) {
 	_, err := r.Run("status")
 	if err == nil {
 		t.Fatal("Run returned nil error for a nonexistent binary, want an error")
+	}
+}
+
+func TestExecRunner_RunStreamAcceptsLargeLines(t *testing.T) {
+	t.Setenv("LAZYLORE_RUNNER_HELPER_MODE", "large-line")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolving test executable: %v", err)
+	}
+	runner := lore.NewExecRunner(executable, "")
+	defer runner.Shutdown()
+
+	longest := 0
+	result, err := runner.RunStream(func(line string) {
+		if len(line) > longest {
+			longest = len(line)
+		}
+	}, "-test.run=^TestExecRunnerHelper$")
+	if err != nil {
+		t.Fatalf("RunStream returned error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, stderr = %q", result.ExitCode, result.Stderr)
+	}
+	if longest != 2*1024*1024 {
+		t.Fatalf("longest streamed line = %d bytes, want %d", longest, 2*1024*1024)
+	}
+}
+
+func TestExecRunner_ShutdownCancelsActiveCommand(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "started")
+	t.Setenv("LAZYLORE_RUNNER_HELPER_MODE", "wait")
+	t.Setenv("LAZYLORE_RUNNER_HELPER_MARKER", marker)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolving test executable: %v", err)
+	}
+	runner := lore.NewExecRunner(executable, "")
+
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := runner.Run("-test.run=^TestExecRunnerHelper$")
+		done <- runErr
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("helper process did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	started := time.Now()
+	runner.Shutdown()
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("Shutdown took %s, want active command canceled promptly", elapsed)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after Shutdown")
+	}
+	if _, err := runner.Run("version"); err == nil {
+		t.Fatal("Run started a new command after Shutdown")
+	}
+}
+
+func TestExecRunnerHelper(t *testing.T) {
+	switch os.Getenv("LAZYLORE_RUNNER_HELPER_MODE") {
+	case "large-line":
+		fmt.Println(strings.Repeat("x", 2*1024*1024))
+	case "wait":
+		if err := os.WriteFile(os.Getenv("LAZYLORE_RUNNER_HELPER_MARKER"), []byte("started"), 0o600); err != nil {
+			t.Fatalf("writing marker: %v", err)
+		}
+		time.Sleep(30 * time.Second)
 	}
 }

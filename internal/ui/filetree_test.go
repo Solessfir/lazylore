@@ -14,6 +14,17 @@ func TestBuildFileTree_EmptyStatusHasNoRows(t *testing.T) {
 	}
 }
 
+func TestBuildFileTree_PreservesChangedEmptyDirectory(t *testing.T) {
+	s := lore.Status{Unstaged: []lore.FileChange{{Status: 'A', Path: "Content/Empty", Directory: true}}}
+	rows := flattenFileTree(buildFileTree(s), nil)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want one actionable directory row", rows)
+	}
+	if !rows[0].node.isDir || !rows[0].node.hasChange || rows[0].node.path != "Content/Empty" {
+		t.Fatalf("rows[0] = %+v, want changed directory Content/Empty", rows[0])
+	}
+}
+
 func TestBuildFileTree_SkipsPathsWithNoFilenameSegment(t *testing.T) {
 	// A trailing slash (or an outright empty path) makes strings.Split
 	// produce an empty last segment, which would insert a blank-labeled leaf row.

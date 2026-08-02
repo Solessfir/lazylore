@@ -72,7 +72,7 @@ func TestLoadDiffCmd_ReturnsDiffMsg(t *testing.T) {
 {"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `},
 	}}
-	msg := loadDiffCmd(fake, "hello.txt", lore.Lock{}, false)()
+	msg := loadDiffCmd(fake, "hello.txt", lore.Lock{}, false, mainContentRequest{})()
 	dm, ok := msg.(diffMsg)
 	if !ok {
 		t.Fatalf("msg = %#v, want diffMsg", msg)
@@ -87,7 +87,7 @@ func TestLoadDiffCmd_PrependsLockLineWhenLocked(t *testing.T) {
 		"--json diff hello.txt": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"hello.txt","patch":"+++ hello.txt\n","action":"keep"}}
 ` + jsonCompleteSuccess},
 	}}
-	msg := loadDiffCmd(fake, "hello.txt", lore.Lock{Path: "hello.txt", Owner: "user-123"}, true)()
+	msg := loadDiffCmd(fake, "hello.txt", lore.Lock{Path: "hello.txt", Owner: "user-123"}, true, mainContentRequest{})()
 	dm := msg.(diffMsg)
 	want := "Locked by user-123\n\n+++ hello.txt\n"
 	if dm.text != want {
@@ -102,7 +102,7 @@ func TestLoadDiffCmd_RenamesBareBinaryMarkerWithThePath(t *testing.T) {
 		"--json diff a.uasset": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"a.uasset","patch":"Binary files differ\n","action":"keep"}}
 ` + jsonCompleteSuccess},
 	}}
-	msg := loadDiffCmd(fake, "a.uasset", lore.Lock{}, false)()
+	msg := loadDiffCmd(fake, "a.uasset", lore.Lock{}, false, mainContentRequest{})()
 	dm := msg.(diffMsg)
 	want := "Binary file a.uasset differs\n"
 	if dm.text != want {
@@ -287,7 +287,10 @@ func TestDiscardAllCmd_CallsRunnerForEveryPath(t *testing.T) {
 func TestEditorCommand_UsesVisualOverEditor(t *testing.T) {
 	t.Setenv("VISUAL", "myvisual")
 	t.Setenv("EDITOR", "myeditor")
-	c := editorCommand("/repo/a.txt")
+	c, err := editorCommand("/repo/a.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got := c.Args[0]; got != "myvisual" {
 		t.Fatalf("editor binary = %q, want %q", got, "myvisual")
 	}
@@ -299,7 +302,10 @@ func TestEditorCommand_UsesVisualOverEditor(t *testing.T) {
 func TestEditorCommand_FallsBackToEditorThenPlatformDefault(t *testing.T) {
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "code -w")
-	c := editorCommand("/repo/a.txt")
+	c, err := editorCommand("/repo/a.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got := c.Args[0]; got != "code" {
 		t.Fatalf("editor binary = %q, want %q", got, "code")
 	}
@@ -308,9 +314,32 @@ func TestEditorCommand_FallsBackToEditorThenPlatformDefault(t *testing.T) {
 	}
 
 	t.Setenv("EDITOR", "")
-	c = editorCommand("/repo/a.txt")
+	c, err = editorCommand("/repo/a.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if c.Args[0] == "" {
 		t.Fatal("expected a non-empty platform-default editor when neither VISUAL nor EDITOR is set")
+	}
+}
+
+func TestEditorCommand_PreservesQuotedExecutablePathAndArguments(t *testing.T) {
+	t.Setenv("VISUAL", `"C:\Program Files\Editor\editor.exe" --wait "two words"`)
+	c, err := editorCommand(`C:\repo\a.txt`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := []string{`C:\Program Files\Editor\editor.exe`, "--wait", "two words", `C:\repo\a.txt`}
+	if !reflect.DeepEqual(c.Args, want) {
+		t.Fatalf("Args = %#v, want %#v", c.Args, want)
+	}
+}
+
+func TestEditorCommand_RejectsUnterminatedQuote(t *testing.T) {
+	t.Setenv("VISUAL", `"C:\Program Files\Editor\editor.exe`)
+	if _, err := editorCommand(`C:\repo\a.txt`); err == nil {
+		t.Fatal("expected an error for an unterminated quote")
 	}
 }
 

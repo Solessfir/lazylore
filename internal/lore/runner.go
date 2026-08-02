@@ -3,10 +3,13 @@ package lore
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // Result is the outcome of running one lore CLI invocation.
@@ -37,10 +40,95 @@ type StreamRunner interface {
 type ExecRunner struct {
 	BinaryPath string
 	RepoPath   string
+	context    context.Context
+	cancel     context.CancelFunc
+	state      *execRunnerState
+}
+
+type execRunnerState struct {
+	mu      sync.Mutex
+	changed *sync.Cond
+	active  int
+	closing bool
+}
+
+// NewExecRunner creates a runner whose subprocesses are owned by the
+// application lifecycle. Shutdown cancels every active command and waits for
+// its process-reaping path to finish before lazylore exits.
+func NewExecRunner(binaryPath, repoPath string) *ExecRunner {
+	ctx, cancel := context.WithCancel(context.Background())
+	state := &execRunnerState{}
+	state.changed = sync.NewCond(&state.mu)
+	return &ExecRunner{
+		BinaryPath: binaryPath,
+		RepoPath:   repoPath,
+		context:    ctx,
+		cancel:     cancel,
+		state:      state,
+	}
+}
+
+func (r ExecRunner) command(args ...string) *exec.Cmd {
+	ctx := r.context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return exec.CommandContext(ctx, r.BinaryPath, args...)
+}
+
+func (r ExecRunner) begin() error {
+	if r.state == nil {
+		return nil
+	}
+
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	if r.state.closing {
+		return context.Canceled
+	}
+
+	r.state.active++
+	return nil
+}
+
+func (r ExecRunner) done() {
+	if r.state == nil {
+		return
+	}
+
+	r.state.mu.Lock()
+	r.state.active--
+	r.state.changed.Broadcast()
+	r.state.mu.Unlock()
+}
+
+// Shutdown prevents new commands from starting, cancels active subprocesses,
+// and waits until every Run/RunStream call has reaped its child process.
+func (r ExecRunner) Shutdown() {
+	if r.state == nil {
+		return
+	}
+
+	r.state.mu.Lock()
+	r.state.closing = true
+	r.state.mu.Unlock()
+
+	r.cancel()
+
+	r.state.mu.Lock()
+	for r.state.active > 0 {
+		r.state.changed.Wait()
+	}
+	r.state.mu.Unlock()
 }
 
 func (r ExecRunner) Run(args ...string) (Result, error) {
-	cmd := exec.Command(r.BinaryPath, args...)
+	if err := r.begin(); err != nil {
+		return Result{Args: args}, fmt.Errorf("running lore %s: %w", strings.Join(args, " "), err)
+	}
+	defer r.done()
+
+	cmd := r.command(args...)
 	if r.RepoPath != "" {
 		cmd.Dir = r.RepoPath
 	}
@@ -64,12 +152,16 @@ func (r ExecRunner) Run(args ...string) (Result, error) {
 }
 
 // RunStream is Run, plus onLine is called with each line of stdout as the
-// process emits it (buffered by bufio.Scanner's default line-at-a-time
-// behavior). The full stdout is still returned in Result, same as Run,
+// process emits it. The full stdout is still returned in Result, same as Run,
 // since callers (see runCheckedStream) need it to find the terminal
 // "complete" event same as any other --json command.
 func (r ExecRunner) RunStream(onLine func(string), args ...string) (Result, error) {
-	cmd := exec.Command(r.BinaryPath, args...)
+	if err := r.begin(); err != nil {
+		return Result{Args: args}, fmt.Errorf("running lore %s: %w", strings.Join(args, " "), err)
+	}
+	defer r.done()
+
+	cmd := r.command(args...)
 	if r.RepoPath != "" {
 		cmd.Dir = r.RepoPath
 	}
@@ -84,19 +176,32 @@ func (r ExecRunner) RunStream(onLine func(string), args ...string) (Result, erro
 		return Result{Args: args}, fmt.Errorf("running lore %s: %w", strings.Join(args, " "), err)
 	}
 
-	scanner := bufio.NewScanner(stdoutPipe)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	reader := bufio.NewReader(stdoutPipe)
+	var readErr error
+	for {
+		line, err := reader.ReadString('\n')
 		stdout.WriteString(line)
-		stdout.WriteByte('\n')
+		line = strings.TrimSuffix(line, "\n")
+		line = strings.TrimSuffix(line, "\r")
 		if onLine != nil {
-			onLine(line)
+			if line != "" {
+				onLine(line)
+			}
+		}
+
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				readErr = err
+			}
+			break
 		}
 	}
 
 	runErr := cmd.Wait()
 	result := Result{Args: args, Stdout: stdout.String(), Stderr: stderr.String()}
+	if readErr != nil {
+		return result, fmt.Errorf("reading lore %s output: %w", strings.Join(args, " "), readErr)
+	}
 
 	var exitErr *exec.ExitError
 	switch {

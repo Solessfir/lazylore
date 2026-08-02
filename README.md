@@ -11,15 +11,16 @@ source version control system - the same relationship
 
 Pre-1.0. Covers the daily-driver core loop: viewing status, staging/unstaging
 files, discarding changes, committing, viewing diffs, switching/creating/
-resetting branches, browsing revision history, and file locking. `push`,
-`layers`, and everything else `lore` exposes are not wired up yet.
+resetting and merging branches, browsing revision history, pulling, pushing,
+and file locking. `layers` and the remaining `lore` commands are not wired up
+yet.
 
 ## Requirements
 
 - A `lore` binary on your `PATH` (or configured via `lorePath` in
   `config.yml`, see below).
-- A `lore` repository (a directory containing a `.lore/` folder) as your
-  working directory when you launch `lazylore`.
+- When launched outside a Lore repository, `lazylore` prompts for a remote to
+  clone.
 
 ## Install
 
@@ -53,8 +54,9 @@ Global (work regardless of which panel is focused):
 | Key | Action |
 |---|---|
 | `Tab` / `Shift+Tab` or `l` / `h` | cycle focused panel |
-| `1`-`5` | jump to a panel directly (Status, Files, Branches, History, Diff) |
+| `1`-`6` | jump directly to Status, Files, Branches, History, Diff, or Command Log |
 | `[` / `]` | cycle Branches sub-tab (Local / Remotes) |
+| `p` / `P` | pull / push the current branch |
 | `/` | filter the focused list |
 | `v` | select mode (release mouse capture to copy text with your terminal) |
 | Mouse click | focus a panel / select a row |
@@ -83,6 +85,7 @@ Branches panel:
 | `Space` | checkout the selected branch |
 | `n` | create a new branch (opens a name prompt) |
 | `g` | reset the current branch to the selected branch |
+| `M` | merge the selected branch into the current branch |
 
 History panel:
 

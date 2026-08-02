@@ -33,14 +33,21 @@ type currentUserMsg struct {
 	err error
 }
 
+type mainContentRequest struct {
+	id     uint64
+	source focusPanel
+	target string
+}
+
 // diffMsg carries text for the shared main content panel - a file diff
 // (Files panel), a branch log (Branches panel), or a revision patch
 // (History panel). raw skips diff coloring for content that isn't actually
 // diff/patch text (a log listing), see diffModel.SetContentRaw.
 type diffMsg struct {
-	text string
-	err  error
-	raw  bool
+	request mainContentRequest
+	text    string
+	err     error
+	raw     bool
 }
 
 // actionDoneMsg reports a background lore command's result. opKey, revert,
