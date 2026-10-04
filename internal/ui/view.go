@@ -374,6 +374,9 @@ func (m Model) View() string {
 	shortcuts := keybindBarFor(m.focus)
 	if m.showHelp || m.prompt == promptDiscardMenu {
 		shortcuts = "Execute: <enter> | Close/Cancel: <esc>"
+		if m.showHelp && m.helpInput.Focused() {
+			shortcuts = "Execute: <enter> | Clear filter: <esc>"
+		}
 	} else if m.prompt != promptNone {
 		shortcuts = "Confirm: <enter> | Close/Cancel: <esc>"
 	}

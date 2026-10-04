@@ -85,8 +85,12 @@ Press `Enter` to apply a filter, including zero matches. `Esc` clears it.
 
 Popups use compact titled borders and contextual footer shortcuts. `Enter`
 confirms and `Esc` cancels; confirmation dialogs also accept `y` and `n`.
-In keybindings help, `Enter` executes the selected binding through its usual
-confirmation and guards. Resizing preserves the selected help row and input text.
+In keybindings help, type to search descriptions with fuzzy matching. Prefix the
+query with `@` to search key names, such as `@space` or `@shift+tab`. `/` also opens
+the filter. Arrow keys navigate results; `j` and `k` navigate
+before searching. `Esc` clears the search, then closes the help. `Enter` executes
+the selected binding through its usual confirmation and guards. Resizing preserves
+the selected help row and input text.
 
 Scrollable panes draw their scrollbar on the border. Below 40 terminal rows,
 the command log shrinks to one content row, leaving more room for the main pane.

@@ -976,10 +976,7 @@ func TestModel_QuestionMarkKeyOpensHelp(t *testing.T) {
 	}
 }
 
-func TestModel_UnrecognizedKeyWhileHelpOpenScrollsInsteadOfClosing(t *testing.T) {
-	// Only esc/'?' close the popup now - everything else (including keys
-	// the viewport doesn't recognize) must leave it open so j/k/arrows can
-	// scroll a keybindings list too long to fit on screen.
+func TestModel_TypingWhileHelpOpenStartsSearch(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
 	m2 := updated.(Model)
@@ -987,7 +984,10 @@ func TestModel_UnrecognizedKeyWhileHelpOpenScrollsInsteadOfClosing(t *testing.T)
 	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	m3 := updated.(Model)
 	if !m3.showHelp {
-		t.Fatal("expected showHelp to stay true after an unrecognized key")
+		t.Fatal("expected showHelp to stay true after typing")
+	}
+	if !m3.helpInput.Focused() || m3.helpInput.Value() != "x" {
+		t.Fatal("typing did not start help search")
 	}
 }
 

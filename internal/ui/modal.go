@@ -321,6 +321,9 @@ func (m Model) renderHelpModal() string {
 	end := min(len(m.helpRows), start+m.helpHeight)
 
 	var b strings.Builder
+	if len(m.helpRows) == 0 {
+		b.WriteString("No matching keybindings")
+	}
 	for i := start; i < end; i++ {
 		r := m.helpRows[i]
 		switch {
@@ -345,9 +348,13 @@ func (m Model) renderHelpModal() string {
 	}
 
 	box := renderTitledPanel(true, m.helpWidth, m.helpHeight, "", "Keybindings", b.String())
-	box = withScrollbar(box, start, len(m.helpRows), m.helpHeight, true)
-	if rank, total := selectableRank(m.helpRows, m.helpCursor); total > 0 {
-		box = withBottomCount(box, fmt.Sprintf("%d of %d", rank, total), true)
+	if m.helpInput.Focused() {
+		box = withTopRightCount(box, m.helpInput.View(), true)
+	} else {
+		box = withTopRightCount(box, "(Type to filter; @ for keys)", true)
 	}
+	box = withScrollbar(box, start, len(m.helpRows), m.helpHeight, true)
+	rank, total := selectableRank(m.helpRows, m.helpCursor)
+	box = withBottomCount(box, fmt.Sprintf("%d of %d", rank, total), true)
 	return box
 }

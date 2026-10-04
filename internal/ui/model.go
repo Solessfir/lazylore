@@ -73,8 +73,9 @@ type Model struct {
 	selectMode             bool   // mouse capture dropped so the terminal can select text (mirrors lazyp4)
 	showHelp               bool   // "?" keybindings popup (see modal.go), mirrors lazyp4's own help overlay
 	helpRows               []helpRow
+	helpInput              textinput.Model
 	helpCursor             int // index into helpRows of the selected row (never a section header)
-	helpWidth, helpHeight  int // popup content size, computed once in openHelp
+	helpWidth, helpHeight  int // popup content size
 
 	// pendingFileOps guards optimistic-UI re-entrancy: "stage:"+path or
 	// "lock:"+path while that path's background lore command is still in
@@ -465,10 +466,10 @@ func (m *Model) toggleDirCollapse(path string) tea.Cmd {
 // focused panel, with the same bounded width and height as other popups.
 func (m *Model) openHelp() {
 	m.showHelp = true
+	m.helpInput = newHelpInput()
 	m.helpRows = m.buildHelpRows()
-	m.helpWidth = m.popupWidth(90)
-	m.helpHeight = min(len(m.helpRows), max(3, 3*m.height/4-borderHeight))
 	m.helpCursor = firstSelectable(m.helpRows)
+	m.resizeHelp()
 }
 
 // logResult records an actionDoneMsg's outcome in the Command Log: a live-
@@ -852,9 +853,7 @@ func (m *Model) resize() {
 	m.syncFocusDelegates()
 
 	if m.showHelp {
-		cursor := m.helpCursor
-		m.openHelp()
-		m.helpCursor = cursor
+		m.resizeHelp()
 	}
 }
 
@@ -1225,22 +1224,7 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 			return m, tea.EnableMouseCellMotion
 		}
 		if m.showHelp {
-			switch msg.String() {
-			case "esc", "?":
-				m.showHelp = false
-			case "j", "down":
-				m.helpCursor = nextSelectable(m.helpRows, m.helpCursor)
-			case "k", "up":
-				m.helpCursor = prevSelectable(m.helpRows, m.helpCursor)
-			case "enter":
-				binding := m.helpRows[m.helpCursor].binding
-				if binding != "" {
-					m.showHelp = false
-					return m.handleKey(helpKeyMsg(binding))
-				}
-			}
-			// Any other key is a harmless no-op instead of closing the popup.
-			return m, nil
+			return m.handleHelpKey(msg)
 		}
 		if m.prompt != promptNone {
 			return m.handlePromptKey(msg)
@@ -1439,6 +1423,9 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		}
 		m.err = nil
 		return m, m.refreshCmd()
+	}
+	if m.showHelp && m.helpInput.Focused() {
+		return m.updateHelpInput(msg)
 	}
 	return m, nil
 }
