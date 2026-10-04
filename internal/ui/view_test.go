@@ -58,6 +58,70 @@ func TestFormatBranchLog_EmptyList(t *testing.T) {
 	}
 }
 
+func TestViewFitsTerminalAndOnlyReplacesLayoutWhenPanesCannotFit(t *testing.T) {
+	for _, tc := range []struct {
+		width, height int
+		tooSmall      bool
+	}{
+		{width: 80, height: 24},
+		{width: 40, height: 24},
+		{width: 120, height: 16},
+		{width: 120, height: 15, tooSmall: true},
+		{width: 80, height: 5, tooSmall: true},
+	} {
+		m := NewModel(&lore.FakeRunner{}, strings.Repeat("界", 40), "/repo")
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
+		m = updated.(Model)
+		view := m.View()
+		if lipgloss.Width(view) > tc.width || lipgloss.Height(view) > tc.height {
+			t.Fatalf("%dx%d rendered %dx%d", tc.width, tc.height, lipgloss.Width(view), lipgloss.Height(view))
+		}
+		if strings.Contains(view, "Terminal too small") != tc.tooSmall {
+			t.Fatalf("%dx%d unexpectedly replaced or rendered the panels: %q", tc.width, tc.height, view)
+		}
+	}
+}
+
+func TestViewCountsVisibleFilteredRowsIncludingNoMatches(t *testing.T) {
+	for _, source := range []focusPanel{focusFiles, focusBranches, focusHistory} {
+		m := newFilteredTestModel(source)
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+		m = updated.(Model)
+		for _, tc := range []struct {
+			text, want string
+		}{
+			{text: "match", want: "1 of 1"},
+			{text: "_no_match", want: "0 of 0"},
+		} {
+			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tc.text)})
+			m = updated.(Model)
+			applyFilterTestCommand(&m, cmd)
+			l := m.computeMouseLayout()
+			bottom := map[focusPanel]int{focusFiles: l.branchesBoxTop - 1, focusBranches: l.historyBoxTop - 1, focusHistory: l.mainH - 1}[source]
+			line := strings.Split(m.View(), "\n")[bottom]
+			if !strings.Contains(line, tc.want) {
+				t.Fatalf("panel %v displayed count %q, want %q", source, line, tc.want)
+			}
+		}
+	}
+}
+
+func TestViewBranchCountTracksActiveTab(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = updated.(Model)
+	updated, _ = m.Update(branchesMsg{branches: []lore.Branch{{Name: "local1"}, {Name: "local2"}, {Name: "remote", Remote: true}}})
+	m = updated.(Model)
+	m.focus = focusBranches
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]")})
+	m = updated.(Model)
+	l := m.computeMouseLayout()
+	line := strings.Split(m.View(), "\n")[l.historyBoxTop-1]
+	if !strings.Contains(line, "1 of 1") {
+		t.Fatalf("remote tab displayed count %q, want 1 of 1", line)
+	}
+}
+
 func TestAheadBehindArrows_MatchesLazygitsFormat(t *testing.T) {
 	// Ground truth: pkg/gui/presentation/branches.go's BranchStatus -
 	// "↓N↑N" both, "↓N" behind only, "↑N" ahead only, "" in sync.

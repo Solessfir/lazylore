@@ -53,11 +53,14 @@ func runChecked(r Runner, args ...string) (Result, error) {
 	}
 
 	events, err := parseEvents(res.Stdout)
-	if err != nil {
-		return res, fmt.Errorf("lore %s: %w", strings.Join(args, " "), err)
+	var complete completeEventData
+	if err == nil {
+		complete, err = findComplete(events)
 	}
-	complete, err := findComplete(events)
 	if err != nil {
+		if stderr := strings.TrimSpace(res.Stderr); res.ExitCode != 0 && stderr != "" {
+			return res, fmt.Errorf("lore %s: %s", strings.Join(args, " "), stderr)
+		}
 		return res, fmt.Errorf("lore %s: %w", strings.Join(args, " "), err)
 	}
 	if complete.Status != 0 {
@@ -96,11 +99,14 @@ func runCheckedStream(r Runner, onEvent func(tagName string, data json.RawMessag
 	}
 
 	events, err := parseEvents(res.Stdout)
-	if err != nil {
-		return res, fmt.Errorf("lore %s: %w", strings.Join(args, " "), err)
+	var complete completeEventData
+	if err == nil {
+		complete, err = findComplete(events)
 	}
-	complete, err := findComplete(events)
 	if err != nil {
+		if stderr := strings.TrimSpace(res.Stderr); res.ExitCode != 0 && stderr != "" {
+			return res, fmt.Errorf("lore %s: %s", strings.Join(args, " "), stderr)
+		}
 		return res, fmt.Errorf("lore %s: %w", strings.Join(args, " "), err)
 	}
 	if complete.Status != 0 {
@@ -155,7 +161,7 @@ func HistoryForBranch(r Runner, branch string, length int) ([]Revision, error) {
 	if length > 0 {
 		args = append(args, strconv.Itoa(length))
 	}
-	args = append(args, "--branch", branch)
+	args = append(args, "--branch="+branch)
 	res, err := runChecked(r, args...)
 	if err != nil {
 		return nil, err
@@ -192,7 +198,7 @@ func parseFileDiffPatches(output string) ([]string, error) {
 }
 
 func Diff(r Runner, path string) (string, error) {
-	res, err := runChecked(r, "diff", path)
+	res, err := runChecked(r, "diff", "--", path)
 	if err != nil {
 		return "", err
 	}
@@ -225,15 +231,15 @@ func DiffRevision(r Runner, source, target string) (string, error) {
 }
 
 func Stage(r Runner, paths ...string) (Result, error) {
-	return runChecked(r, append([]string{"stage"}, paths...)...)
+	return runChecked(r, append([]string{"stage", "--"}, paths...)...)
 }
 
 func Unstage(r Runner, paths ...string) (Result, error) {
-	return runChecked(r, append([]string{"unstage"}, paths...)...)
+	return runChecked(r, append([]string{"unstage", "--"}, paths...)...)
 }
 
 func Reset(r Runner, paths ...string) (Result, error) {
-	return runChecked(r, append([]string{"reset"}, paths...)...)
+	return runChecked(r, append([]string{"reset", "--"}, paths...)...)
 }
 
 // DiscardChanges fully discards a single file's changes, whether staged,
@@ -242,10 +248,10 @@ func Reset(r Runner, paths ...string) (Result, error) {
 // this always unstages first - a safe no-op when nothing was staged - then
 // resets, which is then guaranteed to succeed since nothing remains staged.
 func DiscardChanges(r Runner, path string) (Result, error) {
-	if _, err := runChecked(r, "unstage", path); err != nil {
+	if _, err := runChecked(r, "unstage", "--", path); err != nil {
 		return Result{}, err
 	}
-	return runChecked(r, "reset", path)
+	return runChecked(r, "reset", "--", path)
 }
 
 // DiscardAllChanges discards every currently staged and unstaged change in
@@ -257,16 +263,23 @@ func DiscardAllChanges(r Runner, paths []string) (Result, error) {
 	}
 
 	var result Result
-	for _, batch := range pathArgumentBatches([]string{"unstage"}, paths) {
+	for _, batch := range pathArgumentBatches([]string{"unstage", "--"}, paths) {
 		var err error
-		result, err = runChecked(r, append([]string{"unstage"}, batch...)...)
+		result, err = runChecked(r, append([]string{"unstage", "--"}, batch...)...)
 		if err != nil {
 			return result, err
 		}
 	}
-	for _, batch := range pathArgumentBatches([]string{"reset", "--purge"}, paths) {
+	return DiscardUnstagedChanges(r, paths)
+}
+
+// DiscardUnstagedChanges purges the given unstaged paths. Reset refuses staged
+// files, preserving changes staged after the discard menu opened.
+func DiscardUnstagedChanges(r Runner, paths []string) (Result, error) {
+	var result Result
+	for _, batch := range pathArgumentBatches([]string{"reset", "--purge", "--"}, paths) {
 		var err error
-		result, err = runChecked(r, append([]string{"reset", "--purge"}, batch...)...)
+		result, err = runChecked(r, append([]string{"reset", "--purge", "--"}, batch...)...)
 		if err != nil {
 			return result, err
 		}
@@ -302,13 +315,13 @@ func SyncTo(r Runner, revision string) (Result, error) {
 func RevertRevision(r Runner, revision, message string) (Result, error) {
 	args := []string{"revision", "revert", revision}
 	if message != "" {
-		args = append(args, "--message", message)
+		args = append(args, "--message="+message)
 	}
 	return runChecked(r, args...)
 }
 
 func Commit(r Runner, message string) (Result, error) {
-	return runChecked(r, "commit", message)
+	return runChecked(r, "commit", "--", message)
 }
 
 // Pull syncs the current branch to its latest remote state - `lore sync`
@@ -318,11 +331,11 @@ func Pull(r Runner) (Result, error) {
 }
 
 func SwitchBranch(r Runner, name string) (Result, error) {
-	return runChecked(r, "branch", "switch", name)
+	return runChecked(r, "branch", "switch", "--", name)
 }
 
 func CreateBranch(r Runner, name string) (Result, error) {
-	return runChecked(r, "branch", "create", name)
+	return runChecked(r, "branch", "create", "--", name)
 }
 
 // MergeBranch merges name into the current branch, auto-committing when
@@ -330,5 +343,5 @@ func CreateBranch(r Runner, name string) (Result, error) {
 // same limitation as RevertRevision - so a conflict just surfaces as a
 // runChecked error here.
 func MergeBranch(r Runner, name string) (Result, error) {
-	return runChecked(r, "branch", "merge", name)
+	return runChecked(r, "branch", "merge", "--", name)
 }

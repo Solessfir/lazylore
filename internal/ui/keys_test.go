@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"lazylore/internal/lore"
 )
@@ -27,7 +28,7 @@ func runBatch(cmd tea.Cmd) {
 
 func TestModel_JumpToBranchesLoadsLogForSelectedBranch(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json history 50 --branch main": {ExitCode: 0, Stdout: `{"tagName":"revisionHistoryEntry","data":{"revision":"abc123","revisionNumber":1,"parent":["0000000000000000000000000000000000000000000000000000000000000000","0000000000000000000000000000000000000000000000000000000000000000"]}}
+		"--json history 50 --branch=main": {ExitCode: 0, Stdout: `{"tagName":"revisionHistoryEntry","data":{"revision":"abc123","revisionNumber":1,"parent":["0000000000000000000000000000000000000000000000000000000000000000","0000000000000000000000000000000000000000000000000000000000000000"]}}
 {"tagName":"metadata","data":{"key":"message","value":{"tagName":"string","data":"initial"}}}
 ` + jsonCompleteSuccess,
 		},
@@ -45,7 +46,7 @@ func TestModel_JumpToBranchesLoadsLogForSelectedBranch(t *testing.T) {
 	if !ok || !dm.raw {
 		t.Fatalf("msg = %#v, want a raw diffMsg (Log content)", msg)
 	}
-	if len(fake.Calls) != 1 || fake.Calls[0][4] != "main" {
+	if len(fake.Calls) != 1 || len(fake.Calls[0]) != 4 || fake.Calls[0][3] != "--branch=main" {
 		t.Fatalf("Calls = %+v, want a single history --branch main call", fake.Calls)
 	}
 }
@@ -226,6 +227,128 @@ func TestModel_MouseWheelIgnoredWhilePromptOpen(t *testing.T) {
 	}
 }
 
+func TestModel_MouseDoesNotSelectOrPanListsWhileEditingFilter(t *testing.T) {
+	for _, source := range []focusPanel{focusFiles, focusBranches, focusHistory} {
+		m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+		m = updated.(Model)
+		var changes []lore.FileChange
+		var branches []lore.Branch
+		var revisions []lore.Revision
+		for i := 0; i < 30; i++ {
+			changes = append(changes, lore.FileChange{Status: 'M', Path: fmt.Sprintf("file%02d.txt", i)})
+			branches = append(branches, lore.Branch{Name: fmt.Sprintf("branch%02d", i)})
+			revisions = append(revisions, lore.Revision{Hash: fmt.Sprintf("revision%02d", i)})
+		}
+		updated, _ = m.Update(statusMsg{status: lore.Status{Unstaged: changes}})
+		m = updated.(Model)
+		updated, _ = m.Update(branchesMsg{branches: branches})
+		m = updated.(Model)
+		updated, _ = m.Update(historyMsg{revisions: revisions})
+		m = updated.(Model)
+		m.focus = source
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+		m = updated.(Model)
+		if !m.panelList(source).SettingFilter() {
+			t.Fatalf("panel %v did not enter filter editing", source)
+		}
+		index := m.panelList(source).Index()
+		l := m.computeMouseLayout()
+		top := map[focusPanel]int{focusFiles: l.filesBoxTop, focusBranches: l.branchesBoxTop, focusHistory: l.historyBoxTop}[source]
+		for _, msg := range []tea.MouseMsg{
+			{X: 10, Y: top + 4, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
+			{X: 10, Y: top + 4, Button: tea.MouseButtonWheelDown},
+		} {
+			t.Run(fmt.Sprintf("%v/%v", source, msg.Button), func(t *testing.T) {
+				updated, _ := m.Update(msg)
+				result := updated.(Model)
+				override := map[focusPanel]int{focusFiles: result.filesScrollOverride, focusBranches: result.branchesScrollOverride, focusHistory: result.historyScrollOverride}[source]
+				if result.panelList(source).Index() != index || override != -1 {
+					t.Fatalf("mouse %v changed selection or scroll during filter editing: index=%d override=%d", msg, result.panelList(source).Index(), override)
+				}
+			})
+		}
+	}
+}
+
+func TestModel_MouseCannotInteractWithHiddenSmallTerminalPanels(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 15})
+	m = updated.(Model)
+	var changes []lore.FileChange
+	for i := 0; i < 30; i++ {
+		changes = append(changes, lore.FileChange{Status: 'M', Path: fmt.Sprintf("file%02d.txt", i)})
+	}
+	updated, _ = m.Update(statusMsg{status: lore.Status{Unstaged: changes}})
+	m = updated.(Model)
+	if !strings.Contains(m.View(), "Terminal too small") {
+		t.Fatal("expected the fit warning to replace the panels")
+	}
+	for _, msg := range []tea.MouseMsg{
+		{X: 5, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
+		{X: 5, Y: 5, Button: tea.MouseButtonWheelDown},
+	} {
+		updated, cmd := m.Update(msg)
+		m = updated.(Model)
+		if cmd != nil || m.focus != focusFiles || m.files.Index() != 0 || m.filesScrollOverride != -1 {
+			t.Fatalf("mouse affected hidden panels: focus=%v index=%d scroll=%d cmd=%v", m.focus, m.files.Index(), m.filesScrollOverride, cmd)
+		}
+	}
+}
+
+func TestModel_SmallTerminalPreservesPromptAndBlocksConfirmations(t *testing.T) {
+	for _, prompt := range []promptKind{promptCommit, promptDiscardMenu, promptConfirmForceUnlock} {
+		m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+		m = updated.(Model)
+		m.openCommitPrompt()
+		m.prompt = prompt
+		m.input.SetValue("preserve this summary")
+		m.pendingDiscardPath = "file.txt"
+		m.pendingDiscardPaths = []string{"file.txt"}
+		m.pendingForceUnlockPath = "file.txt"
+		updated, _ = m.Update(tea.WindowSizeMsg{Width: 20, Height: 5})
+		m = updated.(Model)
+		if view := m.View(); !strings.Contains(view, "q / ctrl+c - quit") {
+			t.Fatalf("fallback lost quit guidance: %q", view)
+		}
+		for _, key := range []tea.KeyMsg{
+			{Type: tea.KeyEnter},
+			{Type: tea.KeyRunes, Runes: []rune("y")},
+			{Type: tea.KeyRunes, Runes: []rune("x")},
+		} {
+			updated, cmd := m.Update(key)
+			m = updated.(Model)
+			if cmd != nil || m.prompt != prompt || m.input.Value() != "preserve this summary" {
+				t.Fatalf("hidden prompt %v handled %q: prompt=%v text=%q cmd=%v", prompt, key, m.prompt, m.input.Value(), cmd)
+			}
+		}
+		updated, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+		m = updated.(Model)
+		if m.prompt != prompt || m.input.Value() != "preserve this summary" || strings.Contains(m.View(), "Terminal too small") {
+			t.Fatalf("restoring terminal lost prompt %v or input", prompt)
+		}
+	}
+}
+
+func TestModel_SmallTerminalAllowsQuit(t *testing.T) {
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("q")},
+		{Type: tea.KeyCtrlC},
+	} {
+		m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 20, Height: 5})
+		m = updated.(Model)
+		_, cmd := m.Update(key)
+		if cmd == nil {
+			t.Fatalf("fallback did not handle quit key %q", key)
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Fatalf("fallback key %q did not quit", key)
+		}
+	}
+}
+
 func TestModel_JumpToHistoryLoadsPatchForSelectedRevision(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json diff --source parenthash --target abc123": {ExitCode: 0, Stdout: jsonCompleteSuccess},
@@ -268,7 +391,7 @@ func TestModel_DKeyOnHistoryOpensRevertConfirmWithRevisionHash(t *testing.T) {
 
 func TestModel_YKeyConfirmsRevert(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		`--json revision revert abcdef12 --message Revert "oops"`: {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		`--json revision revert abcdef12 --message=Revert "oops"`: {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	m.focus = focusHistory
@@ -289,8 +412,8 @@ func TestModel_YKeyConfirmsRevert(t *testing.T) {
 	if len(fake.Calls) != 1 || fake.Calls[0][1] != "revision" || fake.Calls[0][2] != "revert" || fake.Calls[0][3] != "abcdef12" {
 		t.Fatalf("Calls = %+v, want a single revision revert call", fake.Calls)
 	}
-	if fake.Calls[0][4] != "--message" || fake.Calls[0][5] != `Revert "oops"` {
-		t.Fatalf("Calls[0] = %+v, want a trailing --message %q", fake.Calls[0], `Revert "oops"`)
+	if len(fake.Calls[0]) != 5 || fake.Calls[0][4] != `--message=Revert "oops"` {
+		t.Fatalf("Calls[0] = %+v, want a trailing %q", fake.Calls[0], `--message=Revert "oops"`)
 	}
 }
 
@@ -320,7 +443,7 @@ func TestModel_EscCancelsRevertPromptWithoutRunnerCalls(t *testing.T) {
 
 func TestModel_SpaceOnBranchesChecksOutSelectedBranch(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json branch switch dev": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json branch switch -- dev": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	m.focus = focusBranches
@@ -350,7 +473,7 @@ func TestModel_SpaceOnBranchesChecksOutSelectedBranch(t *testing.T) {
 	if am.err != nil {
 		t.Fatalf("unexpected error: %v", am.err)
 	}
-	if len(fake.Calls) != 1 || fake.Calls[0][1] != "branch" || fake.Calls[0][2] != "switch" || fake.Calls[0][3] != "dev" {
+	if len(fake.Calls) != 1 || len(fake.Calls[0]) != 5 || fake.Calls[0][1] != "branch" || fake.Calls[0][2] != "switch" || fake.Calls[0][3] != "--" || fake.Calls[0][4] != "dev" {
 		t.Fatalf("Calls = %+v, want a single branch switch call", fake.Calls)
 	}
 }
@@ -444,7 +567,7 @@ func TestModel_GKeyOnHistoryOpensResetConfirmWithRevisionHash(t *testing.T) {
 
 func TestModel_LKeyOnUnlockedFileAcquiresLock(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json lock acquire a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json lock acquire -- a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -462,13 +585,13 @@ func TestModel_LKeyOnUnlockedFileAcquiresLock(t *testing.T) {
 
 func TestModel_LKeyOnOwnLockedFileReleasesLockImmediately(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json lock release a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json lock release -- a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	m.currentUserID = "me"
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
-	updated, _ = m2.Update(locksMsg{locks: []lore.Lock{{Path: "a.txt", Owner: "me"}}})
+	updated, _ = m2.Update(locksMsg{requestID: m2.lockRequestID, locks: []lore.Lock{{Path: "a.txt", Owner: "me"}}})
 	m3 := updated.(Model)
 
 	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
@@ -494,7 +617,7 @@ func TestModel_LKeyOnOtherOwnersLockedFileOpensForceUnlockConfirm(t *testing.T) 
 	m.currentUserID = "me"
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
-	updated, _ = m2.Update(locksMsg{locks: []lore.Lock{{Path: "a.txt", Owner: "someone"}}})
+	updated, _ = m2.Update(locksMsg{requestID: m2.lockRequestID, locks: []lore.Lock{{Path: "a.txt", Owner: "someone"}}})
 	m3 := updated.(Model)
 
 	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
@@ -512,13 +635,13 @@ func TestModel_LKeyOnOtherOwnersLockedFileOpensForceUnlockConfirm(t *testing.T) 
 
 func TestModel_ConfirmingForceUnlockCallsLockReleaseWithForce(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json lock release --force a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json lock release --force -- a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	m.currentUserID = "me"
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
-	updated, _ = m2.Update(locksMsg{locks: []lore.Lock{{Path: "a.txt", Owner: "someone"}}})
+	updated, _ = m2.Update(locksMsg{requestID: m2.lockRequestID, locks: []lore.Lock{{Path: "a.txt", Owner: "someone"}}})
 	m3 := updated.(Model)
 	updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
 	m4 := updated.(Model)
@@ -543,7 +666,7 @@ func TestModel_CancellingForceUnlockMakesNoRunnerCalls(t *testing.T) {
 	m.currentUserID = "me"
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m2 := updated.(Model)
-	updated, _ = m2.Update(locksMsg{locks: []lore.Lock{{Path: "a.txt", Owner: "someone"}}})
+	updated, _ = m2.Update(locksMsg{requestID: m2.lockRequestID, locks: []lore.Lock{{Path: "a.txt", Owner: "someone"}}})
 	m3 := updated.(Model)
 	updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
 	m4 := updated.(Model)
@@ -591,7 +714,7 @@ func TestModel_LockConfirmUpdatesLocksMapBeforeRefreshRebuildsItems(t *testing.T
 
 	// The statusMsg refreshCmd triggers next - it must rebuild Files using
 	// the now-current m.locks, not a stale copy.
-	updated, _ = m4.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
+	updated, _ = m4.Update(statusMsg{generation: m4.refreshGeneration, status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
 	m5 := updated.(Model)
 
 	item, ok := m5.files.SelectedItem().(fileItem)
@@ -602,7 +725,7 @@ func TestModel_LockConfirmUpdatesLocksMapBeforeRefreshRebuildsItems(t *testing.T
 
 func TestModel_SpaceOnFileOptimisticallyFlipsStagedBeforeCommandResolves(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json stage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json stage -- a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -624,7 +747,7 @@ func TestModel_SpaceOnFileOptimisticallyFlipsStagedBeforeCommandResolves(t *test
 
 func TestModel_SecondSpacePressOnSamePathWhilePendingIsNoOp(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json stage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json stage -- a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -710,10 +833,10 @@ func TestModel_ShiftDOnFilesOpensDiscardAllConfirmPrompt(t *testing.T) {
 	}
 }
 
-func TestModel_YKeyConfirmsDiscardAllAtRepositoryRoot(t *testing.T) {
+func TestModel_YKeyConfirmsDiscardAllWithPathsKnownWhenPromptOpened(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage .":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
-		"--json reset --purge .": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json unstage -- a.txt b.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge -- a.txt b.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{
@@ -724,6 +847,15 @@ func TestModel_YKeyConfirmsDiscardAllAtRepositoryRoot(t *testing.T) {
 
 	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
 	m3 := updated.(Model)
+	updated, _ = m3.Update(statusMsg{status: lore.Status{
+		Staged: []lore.FileChange{{Status: 'A', Path: "a.txt"}},
+		Unstaged: []lore.FileChange{
+			{Status: 'M', Path: "b.txt"},
+			{Status: 'A', Path: "after-confirmation.txt"},
+			{Status: 'M', Path: "nested/child.txt"},
+		},
+	}})
+	m3 = updated.(Model)
 
 	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 	m4 := updated.(Model)
@@ -751,8 +883,37 @@ func TestModel_YKeyConfirmsDiscardAllAtRepositoryRoot(t *testing.T) {
 	if am.err != nil {
 		t.Fatalf("unexpected error: %v", am.err)
 	}
-	if len(fake.Calls) != 2 || strings.Join(fake.Calls[0], " ") != "--json unstage ." || strings.Join(fake.Calls[1], " ") != "--json reset --purge ." {
-		t.Fatalf("Calls = %+v, want unstage then reset --purge at repository root", fake.Calls)
+	if len(fake.Calls) != 2 || strings.Join(fake.Calls[0], " ") != "--json unstage -- a.txt b.txt" || strings.Join(fake.Calls[1], " ") != "--json reset --purge -- a.txt b.txt" {
+		t.Fatalf("Calls = %+v, want unstage then reset --purge only for the frozen paths", fake.Calls)
+	}
+	if len(m4.pendingDiscardPaths) != 0 {
+		t.Fatalf("confirmed prompt retained paths: %v", m4.pendingDiscardPaths)
+	}
+}
+
+func TestModel_DiscardAllEmptySnapshotDoesNothing(t *testing.T) {
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "test-repo", "/repo")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	m = updated.(Model)
+	updated, _ = m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'A', Path: "late.txt"}}}})
+	m = updated.(Model)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(Model)
+	if cmd != nil || m.prompt != promptNone || len(fake.Calls) != 0 {
+		t.Fatalf("empty snapshot produced an action: cmd=%v prompt=%v calls=%v", cmd, m.prompt, fake.Calls)
+	}
+}
+
+func TestModel_CancellingDiscardAllClearsSnapshot(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.status = lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	m = updated.(Model)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if cmd != nil || m.prompt != promptNone || len(m.pendingDiscardPaths) != 0 {
+		t.Fatalf("cancel retained an action: cmd=%v prompt=%v paths=%v", cmd, m.prompt, m.pendingDiscardPaths)
 	}
 }
 
@@ -859,7 +1020,7 @@ func TestModel_QuestionMarkAgainClosesHelp(t *testing.T) {
 
 func TestModel_JKeyWhileHelpOpenMovesSelection(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
-	m.width, m.height = 100, 10
+	m.width, m.height = 100, 20
 	(&m).resize()
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
 	m2 := updated.(Model)
@@ -937,8 +1098,8 @@ func TestUpdateFocusedList_RoutesKeysToDiffViewport(t *testing.T) {
 
 func TestHandleKey_FilterModeBypassesGlobalShortcuts(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
-		"--json reset a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json unstage -- a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset -- a.txt":   {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -970,8 +1131,8 @@ func TestHandleKey_FilterModeBypassesGlobalShortcuts(t *testing.T) {
 
 func TestModel_DKeyOnFileOpensDiscardMenuPrompt(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage a.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
-		"--json reset --purge a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json unstage -- a.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge -- a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -995,8 +1156,8 @@ func TestModel_DKeyOnFileOpensDiscardMenuPrompt(t *testing.T) {
 
 func TestModel_XKeyConfirmsDiscardAllAndUnstagesThenResetsPurge(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage a.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
-		"--json reset --purge a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json unstage -- a.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge -- a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -1041,8 +1202,8 @@ func TestModel_XKeyConfirmsDiscardAllAndUnstagesThenResetsPurge(t *testing.T) {
 
 func TestModel_EscCancelsDiscardPromptWithoutRunnerCalls(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage a.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
-		"--json reset --purge a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json unstage -- a.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge -- a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "a.txt"}}}})
@@ -1057,6 +1218,9 @@ func TestModel_EscCancelsDiscardPromptWithoutRunnerCalls(t *testing.T) {
 	}
 	if m4.pendingDiscardPath != "" {
 		t.Fatalf("pendingDiscardPath after esc = %q, want empty", m4.pendingDiscardPath)
+	}
+	if len(m4.pendingDiscardPaths) != 0 || len(m4.pendingDiscardUnstaged) != 0 {
+		t.Fatal("cancelled menu retained its snapshot")
 	}
 	if cmd != nil {
 		t.Fatalf("expected no Cmd after cancelling, got %v", cmd)
@@ -1096,7 +1260,7 @@ func TestModel_AKeyStagesEverythingRegardlessOfSelection(t *testing.T) {
 	// "." is lore's repo-root path, used since there's no real path for
 	// the synthetic root row.
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json stage .": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json stage -- .": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{
@@ -1113,7 +1277,7 @@ func TestModel_AKeyStagesEverythingRegardlessOfSelection(t *testing.T) {
 	m3 := updated.(Model)
 	runBatch(cmd)
 
-	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage ." {
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage -- ." {
 		t.Fatalf("'a' should dispatch a single 'stage .' call, got %+v", fake.Calls)
 	}
 	for _, it := range m3.files.Items() {
@@ -1126,7 +1290,7 @@ func TestModel_AKeyStagesEverythingRegardlessOfSelection(t *testing.T) {
 
 func TestModel_SpaceOnDirectoryStagesEverythingUnderItRecursively(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json stage src": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json stage -- src": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "src/a.go"}}}})
@@ -1141,7 +1305,7 @@ func TestModel_SpaceOnDirectoryStagesEverythingUnderItRecursively(t *testing.T) 
 	m3 := updated.(Model)
 	runBatch(cmd)
 
-	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage src" {
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage -- src" {
 		t.Fatalf("Space on 'src' should dispatch a single 'stage src' call, got %+v", fake.Calls)
 	}
 	item2, ok := m3.files.SelectedItem().(fileItem)
@@ -1184,8 +1348,8 @@ func TestModel_DKeyOnDirectoryOpensDiscardMenuWithUnstagedDisabledWhenNotMixed(t
 
 func TestModel_UKeyOnMixedDirectoryDiscardsOnlyUnstagedFiles(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage src/b.go":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
-		"--json reset --purge src/b.go": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json unstage -- src/b.go":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge -- src/b.go": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{
@@ -1209,8 +1373,184 @@ func TestModel_UKeyOnMixedDirectoryDiscardsOnlyUnstagedFiles(t *testing.T) {
 		t.Fatal("expected a non-nil Cmd after 'u' on a mixed directory")
 	}
 	runBatch(cmd)
-	if len(fake.Calls) != 2 || fake.Calls[0][1] != "unstage" || fake.Calls[0][2] != "src/b.go" {
-		t.Fatalf("Calls = %+v, want unstage+reset --purge for src/b.go only (src/a.go stays staged)", fake.Calls)
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json reset --purge -- src/b.go" {
+		t.Fatalf("Calls = %+v, want reset --purge for src/b.go only (src/a.go stays staged)", fake.Calls)
+	}
+}
+
+func TestModel_BranchTabSwitchUpdatesSelectedContent(t *testing.T) {
+	for _, key := range []string{"[", "]"} {
+		t.Run(key, func(t *testing.T) {
+			m := NewModel(&lore.FakeRunner{}, "repo", "/repo")
+			m.focus = focusBranches
+			m.localBranches = []lore.Branch{{Name: "local"}}
+			m.remoteBranches = []lore.Branch{{Name: "remote", Remote: true}}
+			m.refreshBranchesList()
+			m.ensureMainContent()
+			for _, want := range []string{"remote", "local"} {
+				previous := m.mainContentRequestID
+				updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+				m = updated.(Model)
+				selected := m.branches.SelectedItem().(branchItem).branch.Name
+				if selected != want || m.currentLogBranch != want || m.mainContentRequestID == previous || cmd == nil {
+					t.Fatalf("selected = %q, log = %q, request = %d, cmd nil = %v; want %q with a new request", selected, m.currentLogBranch, m.mainContentRequestID, cmd == nil, want)
+				}
+			}
+			m.remoteBranches = nil
+			previous := m.mainContentRequestID
+			updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+			m = updated.(Model)
+			if m.currentLogBranch != "" || m.mainContentRequestID == previous {
+				t.Fatal("empty remote tab retained the local branch log")
+			}
+		})
+	}
+}
+
+func TestModel_MouseBranchTabsUseVisibleLabelBounds(t *testing.T) {
+	for _, width := range []int{80, 120, 155} {
+		m := NewModel(&lore.FakeRunner{}, "repo", "/repo")
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+		m = updated.(Model)
+		m.localBranches = []lore.Branch{{Name: "local"}}
+		m.remoteBranches = []lore.Branch{{Name: "remote", Remote: true}}
+		m.refreshBranchesList()
+		l := m.computeMouseLayout()
+		line := ansiStrip(strings.Split(m.View(), "\n")[l.branchesBoxTop])
+		for _, tc := range []struct {
+			label  string
+			remote bool
+		}{
+			{label: "Re", remote: true},
+			{label: "branches", remote: false},
+		} {
+			start := lipgloss.Width(line[:strings.Index(line, tc.label)])
+			for x := start; x < start+lipgloss.Width(tc.label); x++ {
+				updated, _ = m.Update(tea.MouseMsg{X: x, Y: l.branchesBoxTop, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+				m = updated.(Model)
+				if m.showRemoteBranches != tc.remote || m.branches.SelectedItem().(branchItem).branch.Name != map[bool]string{false: "local", true: "remote"}[tc.remote] {
+					t.Fatalf("width %d click at %d on %q chose wrong tab: remote=%v", width, x, tc.label, m.showRemoteBranches)
+				}
+			}
+		}
+		for _, x := range []int{0, l.leftW - 1} {
+			updated, _ = m.Update(tea.MouseMsg{X: x, Y: l.branchesBoxTop, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+			m = updated.(Model)
+			if m.showRemoteBranches {
+				t.Fatalf("width %d clicking border at %d changed tabs", width, x)
+			}
+		}
+	}
+}
+
+func TestModel_MouseRowsMatchLongFileAndMultilineRevisionDisplay(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = updated.(Model)
+	longPath := strings.Repeat("a", 90) + ".txt"
+	updated, _ = m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: longPath}, {Status: 'M', Path: "b.txt"}}}})
+	m = updated.(Model)
+	m.files.Select(1)
+	l := m.computeMouseLayout()
+	lines := strings.Split(m.View(), "\n")
+	if !strings.Contains(lines[l.filesBoxTop+3], "b.txt") || m.files.SelectedItem().(fileItem).change.Path != longPath {
+		t.Fatal("selected long filename changed row geometry or its raw action path")
+	}
+	updated, _ = m.Update(tea.MouseMsg{X: 5, Y: l.filesBoxTop + 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = updated.(Model)
+	if m.files.SelectedItem().(fileItem).change.Path != "b.txt" {
+		t.Fatal("click on visible b.txt selected another file")
+	}
+	updated, _ = m.Update(historyMsg{revisions: []lore.Revision{{Hash: "first", Message: "summary\nbody"}, {Hash: "second", Message: "next"}}})
+	m = updated.(Model)
+	lines = strings.Split(m.View(), "\n")
+	if !strings.Contains(lines[l.historyBoxTop+2], "second") || m.history.Items()[0].(revisionItem).revision.Message != "summary\nbody" {
+		t.Fatal("multiline revision changed row geometry or its raw metadata")
+	}
+	updated, _ = m.Update(tea.MouseMsg{X: 5, Y: l.historyBoxTop + 2, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = updated.(Model)
+	if m.history.SelectedItem().(revisionItem).revision.Hash != "second" {
+		t.Fatal("click on visible second revision selected another revision")
+	}
+}
+
+func TestModel_FolderDiscardKeepsPromptSnapshotAfterRefresh(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		path        string
+		key         string
+		want        []string
+		stagedAfter bool
+	}{
+		{"folder all", "src", "x", []string{"src/staged.go", "src/known.go"}, false},
+		{"folder unstaged", "src", "u", []string{"src/known.go"}, false},
+		{"root all", "", "x", []string{"src/staged.go", "src/known.go", "other/known.go"}, false},
+		{"root unstaged", "", "u", []string{"src/known.go", "other/known.go"}, false},
+		{"unstaged file staged after prompt", "src", "u", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &lore.FakeRunner{Results: map[string]lore.Result{
+				"--json unstage -- " + strings.Join(tc.want, " "):       {Stdout: jsonCompleteSuccess},
+				"--json reset --purge -- " + strings.Join(tc.want, " "): {Stdout: jsonCompleteSuccess},
+			}}
+			m := NewModel(fake, "repo", "/repo")
+			status := lore.Status{
+				Staged: []lore.FileChange{{Status: 'M', Path: "src/staged.go"}},
+				Unstaged: []lore.FileChange{
+					{Status: 'M', Path: "src", Directory: true},
+					{Status: 'M', Path: "src/known.go"},
+					{Status: 'M', Path: "other/known.go"},
+				},
+			}
+			updated, _ := m.Update(statusMsg{status: status})
+			m = updated.(Model)
+			found := false
+			for i, item := range m.files.Items() {
+				file := item.(fileItem)
+				if file.isDir && file.path == tc.path {
+					m.files.Select(i)
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("missing directory row %q", tc.path)
+			}
+			updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+			m = updated.(Model)
+			status.Unstaged = append(status.Unstaged,
+				lore.FileChange{Status: 'A', Path: "src/late.go"},
+				lore.FileChange{Status: 'M', Path: "other/late.go"},
+			)
+			if tc.stagedAfter {
+				status.Staged = append(status.Staged, status.Unstaged[1])
+				status.Unstaged = append(status.Unstaged[:1], status.Unstaged[2:]...)
+			}
+			updated, _ = m.Update(statusMsg{status: status})
+			m = updated.(Model)
+			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tc.key)})
+			m = updated.(Model)
+			runBatch(cmd)
+			if len(tc.want) == 0 && len(fake.Calls) != 0 {
+				t.Fatalf("discard touched a newly staged file: %v", fake.Calls)
+			}
+			if len(tc.want) > 0 {
+				expected := []string{"--json reset --purge -- " + strings.Join(tc.want, " ")}
+				if tc.key == "x" {
+					expected = append([]string{"--json unstage -- " + strings.Join(tc.want, " ")}, expected...)
+				}
+				var calls []string
+				for _, call := range fake.Calls {
+					calls = append(calls, strings.Join(call, " "))
+				}
+				if strings.Join(calls, "\n") != strings.Join(expected, "\n") {
+					t.Fatalf("discard broadened its targets: %v", fake.Calls)
+				}
+			}
+			if m.prompt != promptNone || len(m.pendingDiscardPaths) != 0 || len(m.pendingDiscardUnstaged) != 0 {
+				t.Fatal("confirmed menu retained its snapshot")
+			}
+		})
 	}
 }
 
@@ -1222,7 +1562,7 @@ func TestModel_SpaceOnDirectorySparesNamesakeSiblingFile(t *testing.T) {
 	// unrelated namesake file that merely shares its path string
 	// (dirPrefixMatches used to treat filePath == dirPath as "inside").
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json stage SonarV2": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json stage -- SonarV2": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{
@@ -1245,7 +1585,7 @@ func TestModel_SpaceOnDirectorySparesNamesakeSiblingFile(t *testing.T) {
 	m3 := updated.(Model)
 	runBatch(cmd)
 
-	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage SonarV2" {
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage -- SonarV2" {
 		t.Fatalf("Calls = %+v, want a single 'stage SonarV2' (directory) call", fake.Calls)
 	}
 	for _, it := range m3.files.Items() {
@@ -1279,7 +1619,7 @@ func TestModel_CollapsedDirectoryHidesItsFiles(t *testing.T) {
 
 func TestModel_SpaceOnCollapsedDirectoryStagesHiddenFiles(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json stage src": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json stage -- src": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{
@@ -1294,7 +1634,7 @@ func TestModel_SpaceOnCollapsedDirectoryStagesHiddenFiles(t *testing.T) {
 	m4 := updated.(Model)
 	runBatch(cmd)
 
-	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage src" {
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage -- src" {
 		t.Fatalf("Calls = %+v, want stage src despite its children being hidden", fake.Calls)
 	}
 	if hasUnstaged, hasStaged := m4.dirStageCounts("src"); hasUnstaged || !hasStaged {
@@ -1329,7 +1669,7 @@ func TestModel_CommitSeesStagedFilesInsideCollapsedDirectory(t *testing.T) {
 
 func TestModel_SpaceStagesChangedEmptyDirectory(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json stage Content/Empty": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json stage -- Content/Empty": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{
@@ -1340,14 +1680,14 @@ func TestModel_SpaceStagesChangedEmptyDirectory(t *testing.T) {
 	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeySpace})
 	runBatch(cmd)
 
-	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage Content/Empty" {
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage -- Content/Empty" {
 		t.Fatalf("Calls = %+v, want stage Content/Empty", fake.Calls)
 	}
 }
 
 func TestModel_AKeyUsesHiddenChangesWhenDirectoryCollapsed(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json stage .": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json stage -- .": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	m := NewModel(fake, "test-repo", "/repo")
 	updated, _ := m.Update(statusMsg{status: lore.Status{
@@ -1368,7 +1708,7 @@ func TestModel_AKeyUsesHiddenChangesWhenDirectoryCollapsed(t *testing.T) {
 	_, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 	runBatch(cmd)
 
-	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage ." {
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0], " ") != "--json stage -- ." {
 		t.Fatalf("Calls = %+v, want stage . because a hidden file is unstaged", fake.Calls)
 	}
 }

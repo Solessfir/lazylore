@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"lazylore/internal/lore"
 )
@@ -49,6 +50,41 @@ func TestRenderPromptModal_ConfirmShowsPendingLabel(t *testing.T) {
 	got := m.renderPromptModal()
 	if !strings.Contains(got, "Reset current branch to main") {
 		t.Fatalf("renderPromptModal() = %q, want it to contain the pending label", got)
+	}
+}
+
+func TestConfirmationFitsTerminalAndRetainsHints(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.prompt = promptConfirmForceUnlock
+	m.pendingForceUnlockPath = strings.Repeat("界/folder/", 100) + "asset.bin"
+	m.locks = map[string]lore.Lock{m.pendingForceUnlockPath: {Owner: "someone"}}
+	got := m.renderPromptModal()
+	if lipgloss.Width(got) > m.width || lipgloss.Height(got) > m.height {
+		t.Fatalf("confirmation rendered %dx%d for %dx%d", lipgloss.Width(got), lipgloss.Height(got), m.width, m.height)
+	}
+	if !strings.Contains(got, "Force-unlock") || !strings.Contains(got, "y - confirm") || !strings.Contains(got, "n / esc - cancel") {
+		t.Fatalf("confirmation lost context or hints: %q", got)
+	}
+}
+
+func TestCommitModalFitsResizeWithoutChangingText(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	m.openCommitPrompt()
+	value := strings.Repeat("long commit summary ", 10) + "TAIL"
+	m.input.SetValue(value)
+	m.input.CursorEnd()
+	for _, width := range []int{120, 40, 100} {
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+		m = updated.(Model)
+		got := m.renderPromptModal()
+		if lipgloss.Width(got) > width || lipgloss.Height(got) != 3 {
+			t.Fatalf("commit modal after resizing to %d rendered %dx%d", width, lipgloss.Width(got), lipgloss.Height(got))
+		}
+		if m.input.Value() != value || !strings.Contains(got, "TAIL") {
+			t.Fatalf("resize lost text or the cursor's visible text: %q", got)
+		}
 	}
 }
 

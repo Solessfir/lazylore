@@ -80,3 +80,12 @@ func TestDiffModel_SetContentRawSkipsDiffColoring(t *testing.T) {
 		t.Fatalf("SetContentRaw content missing from viewport view: %q", view)
 	}
 }
+
+func TestDiffModel_ScrollbarThumbKeepsItsSizeAtBottom(t *testing.T) {
+	m := newDiffModel(20, 10)
+	m.SetContentRaw(strings.Repeat("row\n", 10) + "row")
+	m.vp.GotoBottom()
+	if cells := strings.Count(m.viewWithScrollbar(), "▐"); cells != 10 {
+		t.Fatalf("bottom drew %d thumb cells, want the full 10-cell thumb", cells)
+	}
+}

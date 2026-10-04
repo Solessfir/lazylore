@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,14 +53,13 @@ type Model struct {
 	// spinner for, and the reveal is dropped.
 	statusGen int
 
-	filesTotal    int
-	branchesTotal int
-	historyTotal  int
-
 	currentDiffPath      string // last file path we issued a diff load for (avoids spamming loads on every cursor move)
 	currentLogBranch     string // last branch we issued a Log load for (Branches panel focused)
 	currentPatchRev      string // last revision we issued a Patch load for (History panel focused)
 	mainContentRequestID uint64
+	lockRequestID        uint64
+	refreshGeneration    uint64
+	filterGenerations    [focusPanelCount]uint64
 
 	// mainContentSource is which of Files/Branches/History last populated
 	// the shared main panel, so mainPanelTitle() knows what's actually
@@ -72,6 +72,8 @@ type Model struct {
 	prompt                 promptKind
 	input                  textinput.Model
 	pendingDiscardPath     string
+	pendingDiscardPaths    []string
+	pendingDiscardUnstaged []string
 	pendingDiscardIsDir    bool   // true when `d` was pressed on a directory row
 	pendingDiscardDirMixed bool   // only meaningful when pendingDiscardIsDir: true when the directory has both staged and unstaged files under it - the only case "discard unstaged" means anything (see discardUnstagedInDirCmd: lore staging is all-or-nothing per file, so a single file is never "mixed")
 	pendingResetRevision   string // revision `g` (branch reset) will target once confirmed
@@ -96,7 +98,7 @@ type Model struct {
 	revisions     []lore.Revision      // last-loaded History list; kept so statusMsg (which can arrive before or after historyMsg) can recompute unpushed coloring on its own
 	collapsedDirs map[string]bool      // Files-panel tree: which directory paths are closed
 	locks         map[string]lore.Lock // path -> lock, for files currently shown in the Files panel
-	currentUserID string               // this session's identity (lore.CurrentUserID), for locked-by-me coloring; "" until loaded or if unauthenticated
+	currentUserID string               // resolved lock owner; "" until loaded or if lookup fails
 	err           error
 
 	width, height int
@@ -166,6 +168,7 @@ func newListDelegate(focused bool, width int) list.ItemDelegate {
 func newPanelList(delegate list.ItemDelegate) list.Model {
 	l := list.New(nil, delegate, 0, 0)
 	l.SetShowTitle(false)
+	l.SetShowFilter(false)
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
 	l.SetShowPagination(false)
@@ -283,7 +286,7 @@ func (m Model) handleMouseWheel(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
 		return m, nil
 	}
-	if m.prompt != promptNone {
+	if m.prompt != promptNone || !m.layoutFits() {
 		return m, nil
 	}
 
@@ -299,6 +302,9 @@ func (m Model) handleMouseWheel(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	panList := func(lst list.Model, height int, override *int) {
+		if lst.SettingFilter() {
+			return
+		}
 		total := len(lst.VisibleItems())
 		if total <= height {
 			return // nothing to scroll
@@ -352,7 +358,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 		return m, nil
 	}
-	if m.prompt != promptNone {
+	if m.prompt != promptNone || !m.layoutFits() {
 		// A popup is covering the screen - clicks shouldn't reach the panels underneath.
 		// (showHelp's own MouseMsg never reaches here - see Update.)
 		return m, nil
@@ -361,17 +367,6 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	l := m.computeMouseLayout()
 	x, y := msg.X, msg.Y
 	effFilesH, effBranchesH, effHistoryH, effDiffH := l.effFilesH, l.effBranchesH, l.effHistoryH, l.effDiffH
-
-	// list.Model.Select (called below) stores the target index as
-	// Page*Paginator.PerPage+cursor internally, so it needs an accurate
-	// PerPage for that round-trip to come back out right on the next
-	// Index() read - resync each list's PerPage to the height actually
-	// rendered THIS frame (a footer-shrink-adjusted height View() computes
-	// fresh every render, via a value receiver, so it never persists back
-	// to the real model on its own) before doing any click math.
-	m.files.SetSize(m.panelWidth, effFilesH)
-	m.branches.SetSize(m.panelWidth, effBranchesH)
-	m.history.SetSize(m.panelWidth, effHistoryH)
 
 	leftW := l.leftW
 	filesH, branchesH, historyH, diffH := l.filesH, l.branchesH, l.historyH, l.diffH
@@ -398,7 +393,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			// Click inside Files content: select the exact row under mouse.
 			// (bubbles/list.Update ignores MouseMsg for cursor; it only reacts to keys.
 			// We compute the target index in the visible list and Select it.)
-			if y >= filesBoxTop+1 && y < filesBoxTop+filesH-1 {
+			if !m.files.SettingFilter() && y >= filesBoxTop+1 && y < filesBoxTop+filesH-1 {
 				relY := y - (filesBoxTop + 1)
 				if relY >= 0 && relY < effFilesH {
 					if target, ok := rowClickTarget(m.files.Index(), len(m.files.VisibleItems()), effFilesH, m.filesScrollOverride, relY); ok {
@@ -410,18 +405,13 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case y < historyBoxTop:
 			newFocus = focusBranches
 			if y == branchesBoxTop {
-				// Click on the title bar (tab area) -> switch Local <-> Remotes
-				// Rough split: left side of title area -> Local, right -> Remotes
-				// This makes the "Remotes" part of the title clickable.
-				if x > leftW/2 {
-					m.showRemoteBranches = true
-				} else {
-					m.showRemoteBranches = false
+				if local, ok := dualTitleTabAtColumn("3", "Local branches", "Remotes", leftW, x); ok {
+					m.showRemoteBranches = !local
+					cmd = m.refreshBranchesList()
 				}
-				cmd = m.refreshBranchesList()
 				break
 			}
-			if y >= branchesBoxTop+1 && y < branchesBoxTop+branchesH-1 {
+			if !m.branches.SettingFilter() && y >= branchesBoxTop+1 && y < branchesBoxTop+branchesH-1 {
 				relY := y - (branchesBoxTop + 1)
 				if relY >= 0 && relY < effBranchesH {
 					if target, ok := rowClickTarget(m.branches.Index(), len(m.branches.VisibleItems()), effBranchesH, m.branchesScrollOverride, relY); ok {
@@ -432,7 +422,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 		default:
 			newFocus = focusHistory
-			if y >= historyBoxTop+1 && y < historyBoxTop+historyH-1 {
+			if !m.history.SettingFilter() && y >= historyBoxTop+1 && y < historyBoxTop+historyH-1 {
 				relY := y - (historyBoxTop + 1)
 				if relY >= 0 && relY < effHistoryH {
 					if target, ok := rowClickTarget(m.history.Index(), len(m.history.VisibleItems()), effHistoryH, m.historyScrollOverride, relY); ok {
@@ -535,9 +525,34 @@ func (m *Model) logResult(msg actionDoneMsg) {
 // delayed reveal still in flight for the action that just finished (see
 // statusRevealDelay) gets dropped instead of flashing on screen after the
 // fact.
-func (m *Model) clearAppStatus() {
+func (m *Model) clearAppStatus(generation int) {
+	if generation != m.statusGen {
+		return
+	}
 	m.appStatus = ""
 	m.statusGen++
+}
+
+func (m *Model) appStatusCmd(text string) tea.Cmd {
+	m.statusGen++
+	msg := setAppStatusMsg{gen: m.statusGen, text: text}
+	return func() tea.Msg { return msg }
+}
+
+func (m *Model) appStatusAction(cmd tea.Cmd) tea.Cmd {
+	generation := m.statusGen
+	return func() tea.Msg {
+		switch msg := cmd().(type) {
+		case actionDoneMsg:
+			msg.statusGeneration = generation
+			return msg
+		case diffMsg:
+			msg.statusGeneration = generation
+			return msg
+		default:
+			return msg
+		}
+	}
 }
 
 // setPendingFileOp marks (or clears) a "stage:"/"lock:" + path key as
@@ -548,6 +563,7 @@ func (m *Model) setPendingFileOp(key string, pending bool) {
 		m.pendingFileOps = map[string]bool{}
 	}
 	if pending {
+		m.refreshGeneration++
 		m.pendingFileOps[key] = true
 	} else {
 		delete(m.pendingFileOps, key)
@@ -587,21 +603,18 @@ func (m *Model) moveFileStatus(path string, fromStaged, toStaged bool) {
 func (m *Model) setFileStagedByPath(path string, from, to bool) tea.Cmd {
 	m.moveFileStatus(path, from, to)
 
-	var cmds []tea.Cmd
-	items := m.files.Items()
+	items := slices.Clone(m.files.Items())
 	for i, it := range items {
 		fi, ok := it.(fileItem)
 		if !ok || fi.isDir || fi.change.Path != path || fi.staged != from {
 			continue
 		}
 		fi.staged = to
-		if cmd := m.files.SetItem(i, fi); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+		items[i] = fi
 		break
 	}
-	cmds = append(cmds, m.refreshVisibleDirectoryStageState()...)
-	return tea.Batch(cmds...)
+	m.refreshVisibleDirectoryStageState(items)
+	return m.listItemsChanged(focusFiles, m.files.SetItems(items))
 }
 
 // setFileLockedByPath flips the lock badge on every Files-panel row for
@@ -609,17 +622,23 @@ func (m *Model) setFileStagedByPath(path string, from, to bool) tea.Cmd {
 // buildFileTree - and a lore lock is a per-path property, not per-row, so
 // both need updating together).
 func (m *Model) setFileLockedByPath(path string, locked bool) tea.Cmd {
-	var cmd tea.Cmd
-	items := m.files.Items()
+	// Ignore snapshots started before this optimistic lock change.
+	m.lockRequestID++
+	items := slices.Clone(m.files.Items())
+	changed := false
 	for i, it := range items {
 		fi, ok := it.(fileItem)
 		if !ok || fi.isDir || fi.change.Path != path {
 			continue
 		}
 		fi.locked = locked
-		cmd = m.files.SetItem(i, fi)
+		items[i] = fi
+		changed = true
 	}
-	return cmd
+	if !changed {
+		return nil
+	}
+	return m.listItemsChanged(focusFiles, m.files.SetItems(items))
 }
 
 // dirPrefixMatches reports whether filePath sits under dirPath (strictly
@@ -652,7 +671,7 @@ func changeIsInDirectory(dirPath string, change lore.FileChange) bool {
 	return dirPrefixMatches(dirPath, change.Path)
 }
 
-func (m *Model) moveDirectoryStatus(dirPath string, fromStaged, toStaged bool) {
+func (m *Model) moveDirectoryStatus(dirPath string, fromStaged, toStaged bool, onlyChanges map[lore.FileChange]bool) {
 	if fromStaged == toStaged {
 		return
 	}
@@ -666,7 +685,7 @@ func (m *Model) moveDirectoryStatus(dirPath string, fromStaged, toStaged bool) {
 
 	kept := (*source)[:0]
 	for _, change := range *source {
-		if changeIsInDirectory(dirPath, change) {
+		if changeIsInDirectory(dirPath, change) && (onlyChanges == nil || onlyChanges[change]) {
 			*destination = append(*destination, change)
 			continue
 		}
@@ -695,9 +714,8 @@ func (m Model) dirStageCounts(dirPath string) (hasUnstaged, hasStaged bool) {
 	return hasUnstaged, hasStaged
 }
 
-func (m *Model) refreshVisibleDirectoryStageState() []tea.Cmd {
-	var cmds []tea.Cmd
-	for index, item := range m.files.Items() {
+func (m *Model) refreshVisibleDirectoryStageState(items []list.Item) {
+	for index, item := range items {
 		file, ok := item.(fileItem)
 		if !ok || !file.isDir {
 			continue
@@ -705,12 +723,8 @@ func (m *Model) refreshVisibleDirectoryStageState() []tea.Cmd {
 
 		hasUnstaged, hasStaged := m.dirStageCounts(file.path)
 		file.allStaged = hasStaged && !hasUnstaged
-		if cmd := m.files.SetItem(index, file); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+		items[index] = file
 	}
-
-	return cmds
 }
 
 // setDirStagedByPrefix is setFileStagedByPath's recursive analog: flips
@@ -718,25 +732,22 @@ func (m *Model) refreshVisibleDirectoryStageState() []tea.Cmd {
 // staged as `from` over to `to`, for space on a directory/root row's
 // optimistic UI (see toggleDirStage).
 func (m *Model) setDirStagedByPrefix(dirPath string, from, to bool) tea.Cmd {
-	m.moveDirectoryStatus(dirPath, from, to)
+	m.moveDirectoryStatus(dirPath, from, to, nil)
 
-	var cmds []tea.Cmd
-	items := m.files.Items()
+	items := slices.Clone(m.files.Items())
 	for i, it := range items {
 		fi, ok := it.(fileItem)
 		if !ok || !fi.trackedChange || fi.staged != from || !changeIsInDirectory(dirPath, fi.change) {
 			continue
 		}
 		fi.staged = to
-		if cmd := m.files.SetItem(i, fi); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+		items[i] = fi
 	}
 
 	// Recompute folders from authoritative status rather than visible rows;
 	// collapsed directories deliberately omit their changed children.
-	cmds = append(cmds, m.refreshVisibleDirectoryStageState()...)
-	return tea.Batch(cmds...)
+	m.refreshVisibleDirectoryStageState(items)
+	return m.listItemsChanged(focusFiles, m.files.SetItems(items))
 }
 
 // toggleDirStage handles space on a directory (or the root "/" row, path
@@ -770,20 +781,31 @@ func (m *Model) toggleDirStage(dirPath string) tea.Cmd {
 	}
 	m.setPendingFileOp(opKey, true)
 
+	source := m.status.Staged
+	if hasUnstaged {
+		source = m.status.Unstaged
+	}
+	changes := make(map[lore.FileChange]bool)
+	for _, change := range source {
+		if changeIsInDirectory(dirPath, change) {
+			changes[change] = true
+		}
+	}
+
 	if hasUnstaged {
 		optimisticCmd := m.setDirStagedByPrefix(dirPath, false, true)
 		return tea.Batch(
 			optimisticCmd,
-			func() tea.Msg { return setAppStatusMsg("Staging...") },
-			dirStageCmd(m.runner, dirPath, lorePath),
+			m.appStatusCmd("Staging..."),
+			m.appStatusAction(dirStageCmd(m.runner, dirPath, lorePath, changes)),
 		)
 	}
 
 	optimisticCmd := m.setDirStagedByPrefix(dirPath, true, false)
 	return tea.Batch(
 		optimisticCmd,
-		func() tea.Msg { return setAppStatusMsg("Unstaging...") },
-		dirUnstageCmd(m.runner, dirPath, lorePath),
+		m.appStatusCmd("Unstaging..."),
+		m.appStatusAction(dirUnstageCmd(m.runner, dirPath, lorePath, changes)),
 	)
 }
 
@@ -822,21 +844,28 @@ func NewModel(r lore.Runner, repoName, repoRoot string) Model {
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		func() tea.Msg { return setAppStatusMsg("Loading...") },
-		loadStatusCmd(m.runner),
-		loadBranchesCmd(m.runner),
-		loadHistoryCmd(m.runner),
+		func() tea.Msg { return setAppStatusMsg{gen: m.statusGen, text: "Loading..."} },
+		loadStatusCmd(m.runner, m.refreshGeneration, m.statusGen),
+		loadBranchesCmd(m.runner, m.refreshGeneration, m.statusGen),
+		loadHistoryCmd(m.runner, m.refreshGeneration, m.statusGen),
 		loadCurrentUserCmd(m.runner),
 		tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg { return tickMsg{} }),
 	)
 }
 
-func refreshCmd(r lore.Runner) tea.Cmd {
+func (m *Model) refreshCmd(showProgress bool) tea.Cmd {
+	m.refreshGeneration++
+	statusGeneration := -1
+	var start tea.Cmd
+	if showProgress {
+		start = m.appStatusCmd("Refreshing...")
+		statusGeneration = m.statusGen
+	}
 	return tea.Batch(
-		func() tea.Msg { return setAppStatusMsg("Refreshing...") },
-		loadStatusCmd(r),
-		loadBranchesCmd(r),
-		loadHistoryCmd(r),
+		start,
+		loadStatusCmd(m.runner, m.refreshGeneration, statusGeneration),
+		loadBranchesCmd(m.runner, m.refreshGeneration, statusGeneration),
+		loadHistoryCmd(m.runner, m.refreshGeneration, statusGeneration),
 	)
 }
 
@@ -896,14 +925,10 @@ func (m *Model) resize() {
 	m.panelWidth = max(0, leftWidth-borderWidth)
 	m.recomputePanelHeights()
 
-	m.files.SetSize(m.panelWidth, max(0, m.filesHeight))
-	m.branches.SetSize(m.panelWidth, max(0, m.branchesHeight))
-	m.history.SetSize(m.panelWidth, max(0, m.historyHeight))
-
 	// Leave 1 column inside the panel for the scrollbar (drawn after content, before right border)
 	diffInnerW := max(0, rightWidth-borderWidth)
 	m.diff.vp.Width = max(0, diffInnerW-1)
-	m.diff.vp.Height = max(0, m.diffHeight)
+	m.syncPanelSizes()
 
 	// Branches/History's selected-row width is baked into their delegate
 	// (see newListDelegate) rather than read live, so it has to be rebuilt
@@ -943,14 +968,33 @@ func (m *Model) recomputePanelHeights() {
 	m.diffHeight = max(0, diffOuter-borderHeight)
 }
 
+func (m *Model) syncPanelSizes() {
+	if m.width == 0 {
+		return
+	}
+	l := m.computeMouseLayout()
+	for _, panel := range []struct {
+		items  *list.Model
+		height int
+	}{
+		{items: &m.files, height: l.effFilesH},
+		{items: &m.branches, height: l.effBranchesH},
+		{items: &m.history, height: l.effHistoryH},
+	} {
+		panel.items.SetShowFilter(panel.items.SettingFilter())
+		panel.items.SetSize(m.panelWidth, max(0, panel.height))
+	}
+	m.diff.vp.Height = max(0, l.effDiffH)
+	m.diff.vp.SetYOffset(m.diff.vp.YOffset)
+}
+
 // rebuildFileItems recomputes the Files list's items (including lock/
 // lockedByMe badges) from the model's last-known status/locks/currentUserID.
 // Called from every handler that can independently learn one of those
 // three, since they load independently and can arrive in any order.
 func (m *Model) rebuildFileItems() tea.Cmd {
 	items := statusToItems(m.status, m.collapsedDirs, m.locks, m.currentUserID)
-	cmd := m.files.SetItems(items)
-	m.filesTotal = len(items)
+	cmd := m.listItemsChanged(focusFiles, m.files.SetItems(items))
 	m.files.SetShowStatusBar(false)
 	m.files.SetShowPagination(false)
 	return cmd
@@ -962,8 +1006,7 @@ func (m *Model) rebuildFileItems() tea.Cmd {
 // can arrive first.
 func (m *Model) rebuildHistoryItems() tea.Cmd {
 	items := historyToItems(m.revisions, m.status.RemoteRevisionNumber, m.status.HasRemoteInfo)
-	cmd := m.history.SetItems(items)
-	m.historyTotal = len(items)
+	cmd := m.listItemsChanged(focusHistory, m.history.SetItems(items))
 	m.history.SetShowStatusBar(false)
 	m.history.SetShowPagination(false)
 	return cmd
@@ -998,7 +1041,7 @@ func (m *Model) refreshBranchesList() tea.Cmd {
 	if m.showRemoteBranches {
 		bs = m.remoteBranches
 	}
-	cmd := m.branches.SetItems(branchesToItems(bs))
+	cmd := m.listItemsChanged(focusBranches, m.branches.SetItems(branchesToItems(bs)))
 	m.branches.SetShowStatusBar(false)
 	m.branches.SetShowPagination(false)
 	return cmd
@@ -1013,6 +1056,55 @@ func (m Model) currentFooter() string {
 		return errorStyle.Render(m.err.Error())
 	}
 	return ""
+}
+
+func (m *Model) panelList(source focusPanel) *list.Model {
+	switch source {
+	case focusFiles:
+		return &m.files
+	case focusBranches:
+		return &m.branches
+	case focusHistory:
+		return &m.history
+	default:
+		return nil
+	}
+}
+
+func (m *Model) listItemsChanged(source focusPanel, cmd tea.Cmd) tea.Cmd {
+	if items := m.panelList(source); items != nil && items.FilterState() == list.Unfiltered {
+		clampListSelection(items)
+	}
+	m.filterGenerations[source]++
+	return wrapFilterCommand(cmd, source, m.filterGenerations[source])
+}
+
+func clampListSelection(items *list.Model) {
+	last := max(0, len(items.VisibleItems())-1)
+	if index := items.Index(); index < 0 || index > last {
+		items.Select(min(last, max(0, index)))
+	}
+}
+
+// Filter commands may be nested in batches alongside cursor commands.
+func wrapFilterCommand(cmd tea.Cmd, source focusPanel, generation uint64) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		switch msg := cmd().(type) {
+		case list.FilterMatchesMsg:
+			return filterMatchesMsg{source: source, generation: generation, matches: msg}
+		case tea.BatchMsg:
+			wrapped := make(tea.BatchMsg, len(msg))
+			for i, sub := range msg {
+				wrapped[i] = wrapFilterCommand(sub, source, generation)
+			}
+			return wrapped
+		default:
+			return msg
+		}
+	}
 }
 
 func (m *Model) beginMainContentRequest(source focusPanel, target string) mainContentRequest {
@@ -1044,6 +1136,8 @@ func (m *Model) clearMainContentSelection(source focusPanel) {
 // when the focused panel has no meaningful content selected (a directory
 // in Files, an empty list).
 func (m *Model) ensureMainContent() tea.Cmd {
+	// Each source remembers its selection, but they all share one content buffer.
+	sourceChanged := m.mainContentSource != m.focus
 	// Status/Command Log have no main-panel content of their own (matches
 	// lazygit - they're not contexts that drive the main view), so
 	// focusing either must not overwrite what mainPanelTitle/the diff
@@ -1064,7 +1158,7 @@ func (m *Model) ensureMainContent() tea.Cmd {
 			m.clearMainContentSelection(focusFiles)
 			return nil
 		}
-		if item.change.Path == m.currentDiffPath {
+		if !sourceChanged && item.change.Path == m.currentDiffPath {
 			return nil
 		}
 		m.currentDiffPath = item.change.Path
@@ -1078,7 +1172,7 @@ func (m *Model) ensureMainContent() tea.Cmd {
 			m.clearMainContentSelection(focusBranches)
 			return nil
 		}
-		if item.branch.Name == m.currentLogBranch {
+		if !sourceChanged && item.branch.Name == m.currentLogBranch {
 			return nil
 		}
 		m.currentLogBranch = item.branch.Name
@@ -1091,7 +1185,7 @@ func (m *Model) ensureMainContent() tea.Cmd {
 			m.clearMainContentSelection(focusHistory)
 			return nil
 		}
-		if item.revision.Hash == m.currentPatchRev {
+		if !sourceChanged && item.revision.Hash == m.currentPatchRev {
 			return nil
 		}
 		m.currentPatchRev = item.revision.Hash
@@ -1123,12 +1217,31 @@ func changedFilePaths(s lore.Status) []string {
 	return paths
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
+	defer func() {
+		if next, ok := updated.(Model); ok {
+			next.syncPanelSizes()
+			updated = next
+		}
+	}()
+	m.syncPanelSizes()
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.resize()
 		return m, nil
+
+	case filterMatchesMsg:
+		lst := m.panelList(msg.source)
+		if lst == nil || msg.generation != m.filterGenerations[msg.source] {
+			return m, nil
+		}
+		updated, cmd := lst.Update(msg.matches)
+		*lst = updated
+		// Bubbles applies matches without updating pagination.
+		lst.SetSize(lst.Width(), lst.Height())
+		clampListSelection(lst)
+		return m, tea.Batch(wrapFilterCommand(cmd, msg.source, msg.generation), m.ensureMainContent())
 
 	case tickMsg:
 		if m.appStatus != "" || m.branchSyncLabel != "" {
@@ -1140,9 +1253,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case setAppStatusMsg:
-		text := string(msg)
+		if msg.gen != m.statusGen {
+			return m, nil
+		}
+		text := msg.text
 		if text == "" {
-			(&m).clearAppStatus()
+			(&m).clearAppStatus(msg.gen)
 			return m, nil
 		}
 		// Don't show the spinner immediately - most actions (stage/unstage,
@@ -1153,10 +1269,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// for one frame and yanking it away read as a flicker, not
 		// information. Only an action that's genuinely still running once
 		// the delay elapses gets a spinner at all.
-		m.statusGen++
-		gen := m.statusGen
 		return m, tea.Tick(statusRevealDelay, func(time.Time) tea.Msg {
-			return revealStatusMsg{gen: gen, text: text}
+			return revealStatusMsg{gen: msg.gen, text: text}
 		})
 
 	case revealStatusMsg:
@@ -1180,6 +1294,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 
 	case tea.MouseMsg:
+		if !m.layoutFits() {
+			return m, nil
+		}
 		if m.showHelp {
 			// Mouse wheel moves the selection like j/k; other clicks
 			// harmlessly no-op instead of reaching panels underneath.
@@ -1197,6 +1314,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouseClick(msg)
 
 	case tea.KeyMsg:
+		if m.width > 0 && !m.layoutFits() {
+			if msg.String() == "q" || msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		if m.selectMode {
 			// Any key exits select mode and restores mouse capture.
 			m.selectMode = false
@@ -1217,10 +1340,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.prompt != promptNone {
 			return m.handlePromptKey(msg)
 		}
+		if lst := m.panelList(m.focus); lst != nil {
+			// Filter commands retain the input's rune slice across updates.
+			lst.FilterInput.SetValue(lst.FilterValue())
+		}
 		return m.handleKey(msg)
 
 	case statusMsg:
-		(&m).clearAppStatus()
+		(&m).clearAppStatus(msg.statusGeneration)
+		if msg.generation != m.refreshGeneration {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -1232,7 +1362,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentDiffPath = ""
 		setCmd := (&m).rebuildFileItems()
 		diffCmd := (&m).ensureMainContent()
-		lockCmd := loadLocksCmd(m.runner, changedFilePaths(msg.status))
+		m.lockRequestID++
+		lockCmd := loadLocksCmd(m.runner, changedFilePaths(msg.status), m.lockRequestID)
 		// statusMsg and historyMsg load independently and can arrive in
 		// either order; rebuild History's unpushed coloring here too so it's
 		// correct even when status lands after history already rendered.
@@ -1240,7 +1371,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(setCmd, diffCmd, lockCmd, historyCmd)
 
 	case branchesMsg:
-		(&m).clearAppStatus()
+		(&m).clearAppStatus(msg.statusGeneration)
+		if msg.generation != m.refreshGeneration {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -1255,15 +1389,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		cmd := m.refreshBranchesList()
-		bs := m.localBranches
-		if m.showRemoteBranches {
-			bs = m.remoteBranches
-		}
-		m.branchesTotal = len(bs)
 		return m, tea.Batch(cmd, (&m).ensureMainContent())
 
 	case historyMsg:
-		(&m).clearAppStatus()
+		(&m).clearAppStatus(msg.statusGeneration)
+		if msg.generation != m.refreshGeneration {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -1273,6 +1405,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, (&m).ensureMainContent())
 
 	case locksMsg:
+		if msg.requestID != m.lockRequestID {
+			return m, nil
+		}
 		// Best-effort: locks require an online remote (see internal/lore/lock.go),
 		// so a failure here (e.g. offline) shouldn't raise the main error banner
 		// on every refresh - the Files panel just shows no lock badges.
@@ -1296,11 +1431,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, (&m).rebuildFileItems()
 
 	case diffMsg:
+		(&m).clearAppStatus(msg.statusGeneration)
 		if msg.request.id != m.mainContentRequestID {
 			return m, nil
 		}
-
-		(&m).clearAppStatus()
 		if msg.err != nil {
 			switch msg.request.source {
 			case focusFiles:
@@ -1339,33 +1473,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case actionDoneMsg:
-		(&m).clearAppStatus()
-		m.branchSyncLabel = ""
-		m.syncGen++
+		ownsStatus := msg.statusGeneration == m.statusGen
+		if strings.HasPrefix(msg.opKey, "lock:") {
+			m.lockRequestID++
+		}
+		(&m).clearAppStatus(msg.statusGeneration)
+		if msg.syncGeneration != 0 && msg.syncGeneration == m.syncGen {
+			m.branchSyncLabel = ""
+			m.syncGen++
+		}
 		if msg.liveStreamed {
 			m.pushInFlight = false
 		}
 		if msg.opKey != "" {
 			(&m).setPendingFileOp(msg.opKey, false)
 		}
+		commitAfterStageAll := m.pendingCommitAfterStageAll && msg.opKey == "stage:."
+		if commitAfterStageAll {
+			m.pendingCommitAfterStageAll = false
+		}
 		if msg.err != nil {
+			var revertCmd tea.Cmd
 			if msg.revert != nil {
 				msg.revert(&m)
+				revertCmd = m.rebuildFileItems()
 			}
 			// Command Log already shows this error (logResult below) - don't
 			// also set m.err, or it'd duplicate into the footer via
 			// currentFooter().
 			(&m).logResult(msg)
-			return m, nil
+			if len(m.pendingFileOps) == 0 {
+				return m, tea.Batch(revertCmd, m.refreshCmd(ownsStatus))
+			}
+			return m, revertCmd
 		}
 		if msg.confirm != nil {
 			msg.confirm(&m)
 		}
-		if m.pendingCommitAfterStageAll && msg.opKey == "stage:." {
-			m.pendingCommitAfterStageAll = false
+		if commitAfterStageAll && m.prompt == promptNone {
 			(&m).openCommitPrompt()
 			(&m).logResult(msg)
-			return m, tea.Batch(refreshCmd(m.runner), textinput.Blink)
+			return m, tea.Batch(m.refreshCmd(ownsStatus), textinput.Blink)
 		}
 		(&m).logResult(msg)
 		if len(m.pendingFileOps) > 0 {
@@ -1379,7 +1527,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the one refresh that reflects everything.
 			return m, nil
 		}
-		return m, refreshCmd(m.runner)
+		return m, m.refreshCmd(ownsStatus)
 
 	case editorDoneMsg:
 		if msg.err != nil {
@@ -1387,7 +1535,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
-		return m, refreshCmd(m.runner)
+		return m, m.refreshCmd(false)
 	}
 	return m, nil
 }

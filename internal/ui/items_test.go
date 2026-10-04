@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
@@ -147,6 +148,33 @@ func TestCompactTitleDelegate_RenderClipsUnselectedLongBranchNameToPanelWidth(t 
 
 	if w := lipgloss.Width(buf.String()); w > 20 {
 		t.Fatalf("rendered row width = %d, want <= panel width 20; got %q", w, buf.String())
+	}
+}
+
+func TestListDelegatesKeepLongAndMultilineMetadataOnOneRow(t *testing.T) {
+	for _, selected := range []bool{false, true} {
+		for _, tc := range []struct {
+			name     string
+			item     list.Item
+			delegate list.ItemDelegate
+		}{
+			{name: "file", item: fileItem{path: strings.Repeat("a", 90) + ".txt", label: strings.Repeat("a", 90) + ".txt", change: lore.FileChange{Status: 'M'}}, delegate: fileDelegate{focused: selected}},
+			{name: "directory", item: fileItem{label: "folder\nwith\ttabs", isDir: true}, delegate: fileDelegate{focused: selected}},
+			{name: "branch", item: branchItem{branch: lore.Branch{Name: strings.Repeat("branch", 20) + "\nname"}}, delegate: compactTitleDelegate{focused: selected, width: 30}},
+			{name: "revision", item: revisionItem{revision: lore.Revision{Hash: "revision", Author: "世界世界世界世界", Message: "summary\n\nbody"}}, delegate: compactTitleDelegate{focused: selected, width: 30}},
+		} {
+			t.Run(fmt.Sprintf("%s/selected=%v", tc.name, selected), func(t *testing.T) {
+				l := list.New([]list.Item{tc.item}, tc.delegate, 30, 5)
+				var out bytes.Buffer
+				tc.delegate.Render(&out, l, 0, tc.item)
+				if lipgloss.Height(out.String()) != 1 || lipgloss.Width(out.String()) > 30 || !utf8.ValidString(out.String()) {
+					t.Fatalf("delegate rendered invalid row geometry or UTF-8: %q", out.String())
+				}
+				if strings.Contains(out.String(), "body") || strings.Contains(out.String(), "\t") {
+					t.Fatalf("delegate retained multiline body or a terminal control: %q", out.String())
+				}
+			})
+		}
 	}
 }
 

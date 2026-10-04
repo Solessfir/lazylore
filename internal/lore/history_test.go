@@ -1,10 +1,28 @@
 package lore_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"lazylore/internal/lore"
 )
+
+func TestParseHistory_DecodesEscapedAuthors(t *testing.T) {
+	for _, author := range []string{`Native "quoted"`, `Native\name`, "Native\tname", "名字"} {
+		t.Run(author, func(t *testing.T) {
+			encoded, err := json.Marshal(author)
+			if err != nil {
+				t.Fatal(err)
+			}
+			output := `{"tagName":"revisionHistoryEntry","data":{"revision":"abc"}}` + "\n" +
+				`{"tagName":"metadata","data":{"key":"created-by","value":{"tagName":"string","data":` + string(encoded) + `}}}` + "\n"
+			revisions, err := lore.ParseHistory(output)
+			if err != nil || len(revisions) != 1 || revisions[0].Author != author {
+				t.Fatalf("parsed author = %#v, error = %v; want %q", revisions, err, author)
+			}
+		})
+	}
+}
 
 // Captured verbatim from `lore.exe --json history` with two revisions -
 // each revisionHistoryEntry followed by its metadata events (message is

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -104,7 +105,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "[", "]":
 		if m.focus == focusBranches {
 			m.showRemoteBranches = !m.showRemoteBranches
-			return m, m.refreshBranchesList()
+			return m, tea.Batch(m.refreshBranchesList(), (&m).ensureMainContent())
 		}
 		return m, nil
 
@@ -136,7 +137,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		gen := m.syncGen
 		return m, tea.Batch(
 			tea.Tick(statusRevealDelay, func(time.Time) tea.Msg { return revealSyncMsg{gen: gen, label: "Pulling"} }),
-			pullCmd(m.runner),
+			pullCmd(m.runner, gen),
 		)
 
 	case "P":
@@ -150,7 +151,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		gen := m.syncGen
 		return m, tea.Batch(
 			tea.Tick(statusRevealDelay, func(time.Time) tea.Msg { return revealSyncMsg{gen: gen, label: "Pushing"} }),
-			pushStreamCmd(m.runner),
+			pushStreamCmd(m.runner, gen),
 		)
 
 	case "n":
@@ -180,22 +181,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if wasStaged {
 					return m, tea.Batch(
 						optimisticCmd,
-						func() tea.Msg { return setAppStatusMsg("Unstaging...") },
-						unstageCmd(m.runner, path),
+						m.appStatusCmd("Unstaging..."),
+						m.appStatusAction(unstageCmd(m.runner, path)),
 					)
 				}
 				return m, tea.Batch(
 					optimisticCmd,
-					func() tea.Msg { return setAppStatusMsg("Staging...") },
-					stageCmd(m.runner, path),
+					m.appStatusCmd("Staging..."),
+					m.appStatusAction(stageCmd(m.runner, path)),
 				)
 			}
 		case focusBranches:
 			// Checkout, matching lazygit's Branches-panel space key.
 			if item, ok := m.branches.SelectedItem().(branchItem); ok {
 				return m, tea.Batch(
-					func() tea.Msg { return setAppStatusMsg("Checking out...") },
-					switchBranchCmd(m.runner, item.branch.Name),
+					m.appStatusCmd("Checking out..."),
+					m.appStatusAction(switchBranchCmd(m.runner, item.branch.Name)),
 				)
 			}
 		case focusHistory:
@@ -203,8 +204,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// working state to the selected revision.
 			if item, ok := m.history.SelectedItem().(revisionItem); ok && item.revision.Hash != "" {
 				return m, tea.Batch(
-					func() tea.Msg { return setAppStatusMsg("Checking out...") },
-					syncToCmd(m.runner, item.revision.Hash, "checkout "+shortHash(item.revision.Hash)),
+					m.appStatusCmd("Checking out..."),
+					m.appStatusAction(syncToCmd(m.runner, item.revision.Hash, "checkout "+shortHash(item.revision.Hash))),
 				)
 			}
 		}
@@ -223,9 +224,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.pendingDiscardPath = lorePath
 				m.pendingDiscardIsDir = item.isDir
 				m.pendingDiscardDirMixed = false
+				m.pendingDiscardPaths = []string{lorePath}
+				m.pendingDiscardUnstaged = nil
 				if item.isDir {
 					hasUnstaged, hasStaged := m.dirStageCounts(item.path)
 					m.pendingDiscardDirMixed = hasUnstaged && hasStaged
+					m.pendingDiscardPaths = nil
+					for _, path := range changedFilePaths(m.status) {
+						if dirPrefixMatches(item.path, path) {
+							m.pendingDiscardPaths = append(m.pendingDiscardPaths, path)
+						}
+					}
+					for _, change := range m.status.Unstaged {
+						if !change.Directory && dirPrefixMatches(item.path, change.Path) {
+							m.pendingDiscardUnstaged = append(m.pendingDiscardUnstaged, change.Path)
+						}
+					}
 				}
 			}
 		case focusHistory:
@@ -244,6 +258,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "D":
 		if m.focus == focusFiles {
 			m.prompt = promptConfirmDiscardAll
+			m.pendingDiscardPaths = changedFilePaths(m.status)
 		}
 		return m, nil
 
@@ -266,8 +281,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.currentDiffPath = item.change.Path
 				request := (&m).beginMainContentRequest(focusFiles, item.change.Path)
 				return m, tea.Batch(
-					func() tea.Msg { return setAppStatusMsg("Loading diff...") },
-					loadDiffCmd(m.runner, item.change.Path, lock, locked, request),
+					m.appStatusCmd("Loading diff..."),
+					m.appStatusAction(loadDiffCmd(m.runner, item.change.Path, lock, locked, request)),
 				)
 			}
 		}
@@ -329,8 +344,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				(&m).setPendingFileOp(opKey, true)
 				return m, tea.Batch(
 					optimisticCmd,
-					func() tea.Msg { return setAppStatusMsg("Updating lock...") },
-					lockToggleCmd(m.runner, path, wasLocked),
+					m.appStatusCmd("Updating lock..."),
+					m.appStatusAction(lockToggleCmd(m.runner, path, wasLocked)),
 				)
 			}
 		}
@@ -359,6 +374,15 @@ func (m Model) focusedListIsFiltering() bool {
 
 func (m Model) updateFocusedList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	filterBefore := ""
+	if lst := m.panelList(m.focus); lst != nil {
+		filterBefore = lst.FilterValue()
+		if msg.Type == tea.KeyEnter && lst.SettingFilter() && filterBefore != "" && len(lst.VisibleItems()) == 0 {
+			lst.SetFilterState(list.FilterApplied)
+			lst.FilterInput.Blur()
+			return m, m.ensureMainContent()
+		}
+	}
 	switch m.focus {
 	case focusFiles:
 		m.files, cmd = m.files.Update(msg)
@@ -372,6 +396,12 @@ func (m Model) updateFocusedList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case focusDiff:
 		m.diff.vp, cmd = m.diff.vp.Update(msg)
 	}
+	if lst := m.panelList(m.focus); lst != nil {
+		if lst.FilterValue() != filterBefore {
+			m.filterGenerations[m.focus]++
+		}
+		cmd = wrapFilterCommand(cmd, m.focus, m.filterGenerations[m.focus])
+	}
 	if mcmd := (&m).ensureMainContent(); mcmd != nil {
 		cmd = tea.Batch(cmd, mcmd)
 	}
@@ -380,46 +410,60 @@ func (m Model) updateFocusedList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.prompt == promptDiscardMenu {
-		path := m.pendingDiscardPath
 		isDir := m.pendingDiscardIsDir
 		mixed := m.pendingDiscardDirMixed
 		switch msg.String() {
 		case "x":
+			paths := m.pendingDiscardPaths
 			m.prompt = promptNone
 			m.pendingDiscardPath = ""
 			m.pendingDiscardIsDir = false
 			m.pendingDiscardDirMixed = false
+			m.pendingDiscardPaths = nil
+			m.pendingDiscardUnstaged = nil
+			if len(paths) == 0 {
+				return m, nil
+			}
 			return m, tea.Batch(
-				func() tea.Msg { return setAppStatusMsg("Discarding...") },
-				discardAllCmd(m.runner, []string{path}),
+				m.appStatusCmd("Discarding..."),
+				m.appStatusAction(discardAllCmd(m.runner, m.repoRoot, paths)),
 			)
 		case "u":
 			if !isDir || !mixed {
 				return m, nil // disabled - see renderPromptModal's tooltip
 			}
-			dirPath := path
-			if dirPath == "." {
-				dirPath = ""
+			currentUnstaged := make(map[string]bool, len(m.status.Unstaged))
+			for _, change := range m.status.Unstaged {
+				if !change.Directory {
+					currentUnstaged[change.Path] = true
+				}
 			}
 			var unstagedPaths []string
-			for _, fc := range m.status.Unstaged {
-				if dirPrefixMatches(dirPath, fc.Path) {
-					unstagedPaths = append(unstagedPaths, fc.Path)
+			for _, path := range m.pendingDiscardUnstaged {
+				if currentUnstaged[path] {
+					unstagedPaths = append(unstagedPaths, path)
 				}
 			}
 			m.prompt = promptNone
 			m.pendingDiscardPath = ""
 			m.pendingDiscardIsDir = false
 			m.pendingDiscardDirMixed = false
+			m.pendingDiscardPaths = nil
+			m.pendingDiscardUnstaged = nil
+			if len(unstagedPaths) == 0 {
+				return m, nil
+			}
 			return m, tea.Batch(
-				func() tea.Msg { return setAppStatusMsg("Discarding unstaged changes...") },
-				discardUnstagedInDirCmd(m.runner, unstagedPaths),
+				m.appStatusCmd("Discarding unstaged changes..."),
+				m.appStatusAction(discardUnstagedInDirCmd(m.runner, m.repoRoot, unstagedPaths)),
 			)
 		case "esc", "n":
 			m.prompt = promptNone
 			m.pendingDiscardPath = ""
 			m.pendingDiscardIsDir = false
 			m.pendingDiscardDirMixed = false
+			m.pendingDiscardPaths = nil
+			m.pendingDiscardUnstaged = nil
 		}
 		return m, nil
 	}
@@ -441,8 +485,8 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingMergeLabel = ""
 		if msg.String() == "y" {
 			return m, tea.Batch(
-				func() tea.Msg { return setAppStatusMsg("Merging...") },
-				mergeBranchCmd(m.runner, branch, label),
+				m.appStatusCmd("Merging..."),
+				m.appStatusAction(mergeBranchCmd(m.runner, branch, label)),
 			)
 		}
 		return m, nil
@@ -450,10 +494,12 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.prompt == promptConfirmDiscardAll {
 		m.prompt = promptNone
-		if msg.String() == "y" {
+		paths := m.pendingDiscardPaths
+		m.pendingDiscardPaths = nil
+		if msg.String() == "y" && len(paths) > 0 {
 			return m, tea.Batch(
-				func() tea.Msg { return setAppStatusMsg("Discarding all changes...") },
-				discardAllCmd(m.runner, []string{"."}),
+				m.appStatusCmd("Discarding all changes..."),
+				m.appStatusAction(discardAllCmd(m.runner, m.repoRoot, paths)),
 			)
 		}
 		return m, nil
@@ -467,8 +513,8 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingResetLabel = ""
 		if msg.String() == "y" {
 			return m, tea.Batch(
-				func() tea.Msg { return setAppStatusMsg("Resetting...") },
-				resetBranchCmd(m.runner, revision, label),
+				m.appStatusCmd("Resetting..."),
+				m.appStatusAction(resetBranchCmd(m.runner, revision, label)),
 			)
 		}
 		return m, nil
@@ -484,8 +530,8 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingRevertMessage = ""
 		if msg.String() == "y" {
 			return m, tea.Batch(
-				func() tea.Msg { return setAppStatusMsg("Reverting...") },
-				revertCmd(m.runner, revision, message, label),
+				m.appStatusCmd("Reverting..."),
+				m.appStatusAction(revertCmd(m.runner, revision, message, label)),
 			)
 		}
 		return m, nil
@@ -504,8 +550,8 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			(&m).setPendingFileOp(opKey, true)
 			return m, tea.Batch(
 				optimisticCmd,
-				func() tea.Msg { return setAppStatusMsg("Force-unlocking...") },
-				lockForceReleaseCmd(m.runner, path),
+				m.appStatusCmd("Force-unlocking..."),
+				m.appStatusAction(lockForceReleaseCmd(m.runner, path)),
 			)
 		}
 		return m, nil

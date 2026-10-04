@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // One universal centered-popup system (see overlay.go) backs every prompt,
@@ -20,7 +21,27 @@ var (
 
 // renderModal builds a centered popup box: a bold title line, a blank line,
 // the body, and (if given) a blank line followed by a dim hint line.
-func renderModal(title, body, hint string) string {
+func (m Model) renderModal(title, body, hint string) string {
+	width := 60
+	if m.width > 0 {
+		width = max(1, m.width-modalBoxStyle.GetHorizontalFrameSize())
+	}
+	title = ansi.Wrap(title, width, "")
+	body = ansi.Wrap(body, width, "")
+	hint = ansi.Wrap(hint, width, "")
+	if m.height > 0 {
+		reserved := modalBoxStyle.GetVerticalFrameSize() + lipgloss.Height(title) + 2
+		if hint != "" {
+			reserved += 2 + lipgloss.Height(hint)
+		}
+		bodyLines := strings.Split(body, "\n")
+		bodyHeight := max(1, m.height-reserved)
+		if len(bodyLines) > bodyHeight {
+			bodyLines = bodyLines[:bodyHeight]
+			bodyLines[bodyHeight-1] = ansi.Truncate(bodyLines[bodyHeight-1], width-1, "") + "…"
+			body = strings.Join(bodyLines, "\n")
+		}
+	}
 	content := modalTitleStyle.Render(title) + "\n\n" + body
 	if hint != "" {
 		content += "\n\n" + modalHintStyle.Render(hint)
@@ -37,22 +58,26 @@ func (m Model) renderPromptModal() string {
 	case promptCommit:
 		return m.renderCommitModal()
 	case promptConfirmStageAllForCommit:
-		return renderModal("No files staged", "You have not staged any files. Commit all files?", "y - confirm   n / esc - cancel")
+		return m.renderModal("No files staged", "You have not staged any files. Commit all files?", "y - confirm   n / esc - cancel")
 	case promptNewBranch:
-		return renderModal("New Branch", m.input.View(), "enter - create   esc - cancel")
+		if m.width > 0 {
+			m.input.Width = max(1, min(m.input.Width, m.width-modalBoxStyle.GetHorizontalFrameSize()-lipgloss.Width(m.input.Prompt)-1))
+			m.input.SetCursor(m.input.Position())
+		}
+		return m.renderModal("New Branch", m.input.View(), "enter - create   esc - cancel")
 	case promptDiscardMenu:
 		return m.renderDiscardMenuModal()
 	case promptConfirmDiscardAll:
-		return renderModal("Discard All Changes", "Discard ALL changes in the working tree?", "y - confirm   n / esc - cancel")
+		return m.renderModal("Discard All Changes", "Discard ALL changes in the working tree?", "y - confirm   n / esc - cancel")
 	case promptConfirmBranchReset:
-		return renderModal("Reset Branch", m.pendingResetLabel+"?", "y - confirm   n / esc - cancel")
+		return m.renderModal("Reset Branch", m.pendingResetLabel+"?", "y - confirm   n / esc - cancel")
 	case promptConfirmBranchMerge:
-		return renderModal("Merge Branch", m.pendingMergeLabel+"?", "y - confirm   n / esc - cancel")
+		return m.renderModal("Merge Branch", m.pendingMergeLabel+"?", "y - confirm   n / esc - cancel")
 	case promptConfirmRevert:
-		return renderModal("Drop Revision", m.pendingResetLabel+"?", "y - confirm   n / esc - cancel")
+		return m.renderModal("Drop Revision", m.pendingResetLabel+"?", "y - confirm   n / esc - cancel")
 	case promptConfirmForceUnlock:
 		owner := m.locks[m.pendingForceUnlockPath].Owner
-		return renderModal("Force Unlock", "Force-unlock "+owner+"'s lock on "+m.pendingForceUnlockPath+"?", "y - confirm   n / esc - cancel")
+		return m.renderModal("Force Unlock", "Force-unlock "+owner+"'s lock on "+m.pendingForceUnlockPath+"?", "y - confirm   n / esc - cancel")
 	default:
 		return ""
 	}
@@ -63,7 +88,14 @@ func (m Model) renderPromptModal() string {
 // panel - see titles.go) instead of a bold inline title line, matching
 // lazygit's own "Commit summary" box.
 func (m Model) renderCommitModal() string {
-	box := focusedPanelStyle.Width(m.input.Width).Height(1).Render(m.input.View())
+	width := m.input.Width
+	if m.width > 0 {
+		width = max(1, min(width, m.width-borderWidth))
+	}
+	// Textinput renders a cursor cell in addition to its configured width.
+	m.input.Width = max(1, width-1)
+	m.input.SetCursor(m.input.Position())
+	box := focusedPanelStyle.Width(width).Height(1).Render(m.input.View())
 	box = injectTitle(box, "", "Commit summary", 0, true)
 	box = withTopRightCount(box, fmt.Sprintf("%d", len([]rune(m.input.Value()))), true)
 	return box
@@ -84,7 +116,7 @@ func (m Model) renderDiscardMenuModal() string {
 	}
 
 	hint := "x - Discard all changes\n" + unstagedLine + "\nesc - cancel"
-	return renderModal("Discard Changes", body, hint)
+	return m.renderModal("Discard Changes", body, hint)
 }
 
 // helpRow is one line of the keybindings overlay: either a section header

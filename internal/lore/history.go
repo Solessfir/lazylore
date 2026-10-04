@@ -3,7 +3,6 @@ package lore
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 // Revision is one entry from `lore --json history`.
@@ -97,13 +96,9 @@ func ParseHistory(output string) ([]Revision, error) {
 				}
 				current.Message = message
 			case "created-by", "committed-by":
-				raw := string(data.Value.Data)
-				author := strings.Trim(raw, `"`)
-				if author == "" || strings.HasPrefix(author, "{") {
-					var s string
-					if json.Unmarshal([]byte(raw), &s) == nil && s != "" {
-						author = s
-					}
+				var author string
+				if err := json.Unmarshal(data.Value.Data, &author); err != nil {
+					return nil, fmt.Errorf("parsing metadata author value: %w", err)
 				}
 				if author != "" {
 					current.Author = author

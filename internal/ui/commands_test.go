@@ -1,8 +1,16 @@
 package ui
 
 import (
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"lazylore/internal/lore"
 )
@@ -13,19 +21,60 @@ import (
 const jsonCompleteSuccess = `{"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `
 
+func TestDiscardCmd_RejectsFileReplacedByDirectory(t *testing.T) {
+	for name, discard := range map[string]func(lore.Runner, string, []string) tea.Cmd{
+		"all":      discardAllCmd,
+		"unstaged": discardUnstagedInDirCmd,
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "changed.txt")
+			if err := os.WriteFile(path, []byte("pending change"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			fake := &lore.FakeRunner{}
+			cmd := discard(fake, root, []string{"changed.txt"})
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			later := filepath.Join(path, "later.txt")
+			if err := os.WriteFile(later, []byte("keep this"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			msg := cmd().(actionDoneMsg)
+			if msg.err == nil || !strings.Contains(msg.err.Error(), "directory") {
+				t.Fatalf("error = %v, want a changed-directory error", msg.err)
+			}
+			if len(fake.Calls) != 0 {
+				t.Fatalf("discard ran commands on a new directory: %v", fake.Calls)
+			}
+			content, err := os.ReadFile(later)
+			if err != nil || string(content) != "keep this" {
+				t.Fatalf("new file changed: %q, %v", content, err)
+			}
+		})
+	}
+}
+
 func TestLoadStatusCmd_ReturnsStatusMsg(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
 		"--json status --scan": {ExitCode: 0, Stdout: `{"tagName":"repositoryStatusRevision","data":{"repository":"abc","branchName":"main"}}
 {"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `},
 	}}
-	msg := loadStatusCmd(fake)()
+	msg := loadStatusCmd(fake, 7, 9)()
 	sm, ok := msg.(statusMsg)
 	if !ok {
 		t.Fatalf("msg = %#v, want statusMsg", msg)
 	}
 	if sm.err != nil {
 		t.Fatalf("unexpected error: %v", sm.err)
+	}
+	if sm.generation != 7 || sm.statusGeneration != 9 {
+		t.Fatalf("generations = %d/%d, want 7/9", sm.generation, sm.statusGeneration)
 	}
 	if sm.status.Repository != "abc" {
 		t.Fatalf("Repository = %q, want abc", sm.status.Repository)
@@ -39,13 +88,16 @@ func TestLoadBranchesCmd_ReturnsBranchesMsg(t *testing.T) {
 {"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `},
 	}}
-	msg := loadBranchesCmd(fake)()
+	msg := loadBranchesCmd(fake, 7, 9)()
 	bm, ok := msg.(branchesMsg)
 	if !ok {
 		t.Fatalf("msg = %#v, want branchesMsg", msg)
 	}
 	if len(bm.branches) != 2 {
 		t.Fatalf("branches = %+v, want 2 entries", bm.branches)
+	}
+	if bm.generation != 7 || bm.statusGeneration != 9 {
+		t.Fatalf("generations = %d/%d, want 7/9", bm.generation, bm.statusGeneration)
 	}
 }
 
@@ -56,7 +108,7 @@ func TestLoadHistoryCmd_ReturnsHistoryMsg(t *testing.T) {
 {"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `},
 	}}
-	msg := loadHistoryCmd(fake)()
+	msg := loadHistoryCmd(fake, 7, 9)()
 	hm, ok := msg.(historyMsg)
 	if !ok {
 		t.Fatalf("msg = %#v, want historyMsg", msg)
@@ -64,11 +116,14 @@ func TestLoadHistoryCmd_ReturnsHistoryMsg(t *testing.T) {
 	if len(hm.revisions) != 1 {
 		t.Fatalf("revisions = %+v, want 1 entry", hm.revisions)
 	}
+	if hm.generation != 7 || hm.statusGeneration != 9 {
+		t.Fatalf("generations = %d/%d, want 7/9", hm.generation, hm.statusGeneration)
+	}
 }
 
 func TestLoadDiffCmd_ReturnsDiffMsg(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json diff hello.txt": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"hello.txt","patch":"+++ hello.txt\n","action":"keep"}}
+		"--json diff -- hello.txt": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"hello.txt","patch":"+++ hello.txt\n","action":"keep"}}
 {"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `},
 	}}
@@ -84,7 +139,7 @@ func TestLoadDiffCmd_ReturnsDiffMsg(t *testing.T) {
 
 func TestLoadDiffCmd_PrependsLockLineWhenLocked(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json diff hello.txt": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"hello.txt","patch":"+++ hello.txt\n","action":"keep"}}
+		"--json diff -- hello.txt": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"hello.txt","patch":"+++ hello.txt\n","action":"keep"}}
 ` + jsonCompleteSuccess},
 	}}
 	msg := loadDiffCmd(fake, "hello.txt", lore.Lock{Path: "hello.txt", Owner: "user-123"}, true, mainContentRequest{})()
@@ -99,7 +154,7 @@ func TestLoadDiffCmd_RenamesBareBinaryMarkerWithThePath(t *testing.T) {
 	// lore's own binary-diff marker has no filename baked in (unlike git's),
 	// see lore-revision/src/file/diff.rs's emit_binary_diff.
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json diff a.uasset": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"a.uasset","patch":"Binary files differ\n","action":"keep"}}
+		"--json diff -- a.uasset": {ExitCode: 0, Stdout: `{"tagName":"fileDiff","data":{"path":"a.uasset","patch":"Binary files differ\n","action":"keep"}}
 ` + jsonCompleteSuccess},
 	}}
 	msg := loadDiffCmd(fake, "a.uasset", lore.Lock{}, false, mainContentRequest{})()
@@ -112,7 +167,7 @@ func TestLoadDiffCmd_RenamesBareBinaryMarkerWithThePath(t *testing.T) {
 
 func TestStageCmd_CallsRunnerAndReturnsActionDoneMsg(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json stage hello.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json stage -- hello.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	msg := stageCmd(fake, "hello.txt")()
 	am, ok := msg.(actionDoneMsg)
@@ -128,22 +183,22 @@ func TestStageCmd_CallsRunnerAndReturnsActionDoneMsg(t *testing.T) {
 	if am.label != "Stage file" {
 		t.Fatalf("label = %q, want %q", am.label, "Stage file")
 	}
-	if want := []string{"lore stage hello.txt"}; !reflect.DeepEqual(am.commands, want) {
+	if want := []string{"lore stage -- hello.txt"}; !reflect.DeepEqual(am.commands, want) {
 		t.Fatalf("commands = %+v, want %+v (no --json - that's plumbing, not something a user would type)", am.commands, want)
 	}
 }
 
 func TestDiscardAllCmd_CommandLogShowsBothRealCommands(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage a.txt b.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
-		"--json reset --purge a.txt b.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json unstage -- a.txt b.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge -- a.txt b.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
-	msg := discardAllCmd(fake, []string{"a.txt", "b.txt"})()
+	msg := discardAllCmd(fake, t.TempDir(), []string{"a.txt", "b.txt"})()
 	am, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("msg = %#v, want actionDoneMsg", msg)
 	}
-	want := []string{"lore unstage a.txt b.txt", "lore reset --purge a.txt b.txt"}
+	want := []string{"lore unstage -- a.txt b.txt", "lore reset --purge -- a.txt b.txt"}
 	if !reflect.DeepEqual(am.commands, want) {
 		t.Fatalf("commands = %+v, want %+v", am.commands, want)
 	}
@@ -151,7 +206,7 @@ func TestDiscardAllCmd_CommandLogShowsBothRealCommands(t *testing.T) {
 
 func TestStageCmd_RevertFlipsFileBackToUnstagedOnFailure(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json stage hello.txt": {ExitCode: 1, Stdout: `{"tagName":"complete","data":{"status":-1,"error":{"errorCode":-1,"message":"conflict","traceLocations":[]}}}` + "\n"},
+		"--json stage -- hello.txt": {ExitCode: 1, Stdout: `{"tagName":"complete","data":{"status":-1,"error":{"errorCode":-1,"message":"conflict","traceLocations":[]}}}` + "\n"},
 	}}
 	msg := stageCmd(fake, "hello.txt")()
 	am, ok := msg.(actionDoneMsg)
@@ -180,7 +235,7 @@ func TestStageCmd_RevertFlipsFileBackToUnstagedOnFailure(t *testing.T) {
 
 func TestUnstageCmd_RevertFlipsFileBackToStagedOnFailure(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage hello.txt": {ExitCode: 1, Stdout: `{"tagName":"complete","data":{"status":-1,"error":{"errorCode":-1,"message":"boom","traceLocations":[]}}}` + "\n"},
+		"--json unstage -- hello.txt": {ExitCode: 1, Stdout: `{"tagName":"complete","data":{"status":-1,"error":{"errorCode":-1,"message":"boom","traceLocations":[]}}}` + "\n"},
 	}}
 	msg := unstageCmd(fake, "hello.txt")()
 	am, ok := msg.(actionDoneMsg)
@@ -206,7 +261,7 @@ func TestUnstageCmd_RevertFlipsFileBackToStagedOnFailure(t *testing.T) {
 
 func TestLockToggleCmd_AcquireRevertsLockedFlagOnFailure(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json lock acquire hello.txt": {ExitCode: 1, Stdout: `{"tagName":"complete","data":{"status":-1,"error":{"errorCode":-1,"message":"boom","traceLocations":[]}}}` + "\n"},
+		"--json lock acquire -- hello.txt": {ExitCode: 1, Stdout: `{"tagName":"complete","data":{"status":-1,"error":{"errorCode":-1,"message":"boom","traceLocations":[]}}}` + "\n"},
 	}}
 	msg := lockToggleCmd(fake, "hello.txt", false)()
 	am, ok := msg.(actionDoneMsg)
@@ -232,7 +287,7 @@ func TestLockToggleCmd_AcquireRevertsLockedFlagOnFailure(t *testing.T) {
 
 func TestLockToggleCmd_AcquireConfirmUsesCurrentUserIDAsOwner(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json lock acquire hello.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json lock acquire -- hello.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	msg := lockToggleCmd(fake, "hello.txt", false)()
 	am := msg.(actionDoneMsg)
@@ -253,7 +308,7 @@ func TestLockToggleCmd_AcquireConfirmFallsBackToUnknownOwnerWhenUnauthenticated(
 	// record must fall back to a placeholder owner, not store that empty
 	// string directly (which would show "Locked by " with nothing after it).
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json lock acquire hello.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json lock acquire -- hello.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	msg := lockToggleCmd(fake, "hello.txt", false)()
 	am := msg.(actionDoneMsg)
@@ -268,10 +323,10 @@ func TestLockToggleCmd_AcquireConfirmFallsBackToUnknownOwnerWhenUnauthenticated(
 
 func TestDiscardAllCmd_CallsRunnerForEveryPath(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json unstage a.txt b.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
-		"--json reset --purge a.txt b.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json unstage -- a.txt b.txt":       {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json reset --purge -- a.txt b.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
-	msg := discardAllCmd(fake, []string{"a.txt", "b.txt"})()
+	msg := discardAllCmd(fake, t.TempDir(), []string{"a.txt", "b.txt"})()
 	am, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("msg = %#v, want actionDoneMsg", msg)
@@ -299,7 +354,7 @@ func TestEditorCommand_UsesVisualOverEditor(t *testing.T) {
 	}
 }
 
-func TestEditorCommand_FallsBackToEditorThenPlatformDefault(t *testing.T) {
+func TestEditorCommand_FallsBackToEditor(t *testing.T) {
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "code -w")
 	c, err := editorCommand("/repo/a.txt")
@@ -312,14 +367,62 @@ func TestEditorCommand_FallsBackToEditorThenPlatformDefault(t *testing.T) {
 	if got := c.Args[1]; got != "-w" {
 		t.Fatalf("extra editor arg = %q, want %q", got, "-w")
 	}
+}
 
-	t.Setenv("EDITOR", "")
-	c, err = editorCommand("/repo/a.txt")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestEditorCommand_UsesInstalledDefault(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows uses notepad as its platform default")
 	}
-	if c.Args[0] == "" {
-		t.Fatal("expected a non-empty platform-default editor when neither VISUAL nor EDITOR is set")
+	editors := []string{"vi", "vim", "nvim", "nano"}
+	for index, editor := range editors {
+		t.Run(editor, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, available := range editors[index:] {
+				if err := os.WriteFile(filepath.Join(dir, available), nil, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("PATH", dir)
+			t.Setenv("VISUAL", "")
+			t.Setenv("EDITOR", "")
+			command, err := editorCommand("/repo/a.txt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if command.Path != filepath.Join(dir, editor) || !reflect.DeepEqual(command.Args, []string{editor, "/repo/a.txt"}) {
+				t.Fatalf("command = %q %#v, want installed %q", command.Path, command.Args, editor)
+			}
+		})
+	}
+}
+
+func TestEditorCommand_ErrorsWithoutInstalledDefault(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows uses notepad as its platform default")
+	}
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	if _, err := editorCommand("/repo/a.txt"); err == nil || err.Error() != "no editor found on PATH; set VISUAL or EDITOR" {
+		t.Fatalf("error = %v, want missing editor configuration guidance", err)
+	}
+}
+
+func TestEditorCommand_PreservesConfiguredMissingEditorError(t *testing.T) {
+	for _, variable := range []string{"VISUAL", "EDITOR"} {
+		t.Run(variable, func(t *testing.T) {
+			t.Setenv("PATH", t.TempDir())
+			t.Setenv("VISUAL", "")
+			t.Setenv("EDITOR", "")
+			t.Setenv(variable, "missing-editor --wait")
+			command, err := editorCommand("/repo/a.txt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if command.Args[0] != "missing-editor" || !errors.Is(command.Err, exec.ErrNotFound) {
+				t.Fatalf("command = %#v, error = %v, want configured missing editor", command.Args, command.Err)
+			}
+		})
 	}
 }
 
@@ -345,7 +448,7 @@ func TestEditorCommand_RejectsUnterminatedQuote(t *testing.T) {
 
 func TestCommitCmd_ReturnsErrorOnFailure(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json commit oops": {ExitCode: 1, Stdout: "{\"tagName\":\"complete\",\"data\":{\"status\":-1,\"error\":{\"errorCode\":-1,\"message\":\"nothing staged\",\"traceLocations\":[]}}}\n"},
+		"--json commit -- oops": {ExitCode: 1, Stdout: "{\"tagName\":\"complete\",\"data\":{\"status\":-1,\"error\":{\"errorCode\":-1,\"message\":\"nothing staged\",\"traceLocations\":[]}}}\n"},
 	}}
 	msg := commitCmd(fake, "oops")()
 	am, ok := msg.(actionDoneMsg)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -73,7 +74,12 @@ func (r ExecRunner) command(args ...string) *exec.Cmd {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return exec.CommandContext(ctx, r.BinaryPath, args...)
+	cmd := exec.CommandContext(ctx, r.BinaryPath, args...)
+	// Resolve relative executables before the child switches to the repository.
+	if cmd.Err == nil && !filepath.IsAbs(cmd.Path) {
+		cmd.Path, cmd.Err = filepath.Abs(cmd.Path)
+	}
+	return cmd
 }
 
 func (r ExecRunner) begin() error {

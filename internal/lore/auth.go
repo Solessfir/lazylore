@@ -24,25 +24,32 @@ type repositoryConfigGetData struct {
 // lock" per LoreLockFileStatusEventData), so it's directly comparable
 // against Owner to tell "locked by me" from "locked by someone else".
 //
-// Tries `lore auth info` first (lore-client/src/cli/commands/auth.rs's
-// AuthCommands::Info: "omit for current user") - works when a real auth
-// endpoint is configured. Falls back to the repo's configured commit
-// identity (`lore repository config get identity`, .lore/config.toml's
-// `identity` field) when that fails or comes back empty: lock acquire
-// itself now uses that same identity as owner whenever no auth endpoint
-// is available (see project_lazylore_lock_owner_todo memory), so without
-// this fallback every one of your own locks on a no-auth server would
-// compare against "" and misreport as someone else's.
+// Selects the repository's configured account for `lore auth info`; an
+// unqualified query can pick a different cached account.
+// A server without an auth endpoint reports anonymous locks as "<unknown>".
+// Other failures or empty auth results
+// fall back to the repository's configured identity.
 func CurrentUserID(r Runner) (string, error) {
-	if id, err := authInfoUserID(r); err == nil && id != "" {
+	identity, configErr := configIdentity(r)
+	if id, err := authInfoUserID(r, identity); err == nil && id != "" {
 		return id, nil
 	}
-	return configIdentity(r)
+	return identity, configErr
 }
 
-func authInfoUserID(r Runner) (string, error) {
-	res, err := runChecked(r, "auth", "info")
+func authInfoUserID(r Runner, identity string) (string, error) {
+	args := []string{"auth", "info"}
+	if identity != "" {
+		args = append(args, "--identity="+identity)
+	}
+	res, err := runChecked(r, args...)
 	if err != nil {
+		if events, parseErr := parseEvents(res.Stdout); parseErr == nil {
+			complete, completeErr := findComplete(events)
+			if completeErr == nil && complete.Status == 9 && complete.Error.ErrorCode == 9 && complete.Error.Message == "Operation not supported: authentication requires a configured auth endpoint" {
+				return "<unknown>", nil
+			}
+		}
 		return "", err
 	}
 	events, err := parseEvents(res.Stdout)

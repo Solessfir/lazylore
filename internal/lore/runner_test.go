@@ -60,6 +60,35 @@ func TestExecRunner_Run_BinaryNotFoundIsAnError(t *testing.T) {
 	}
 }
 
+func TestExecRunner_RelativeBinaryUsesLaunchDirectory(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go not on PATH")
+	}
+	launchDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(launchDir, "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(goBin, filepath.Join(launchDir, "bin", "go")); err != nil {
+		t.Skipf("cannot create executable symlink: %v", err)
+	}
+	repoDir := t.TempDir()
+	t.Chdir(launchDir)
+	runner := lore.NewExecRunner(filepath.Join("bin", "go"), repoDir)
+	defer runner.Shutdown()
+	for _, stream := range []bool{false, true} {
+		var result lore.Result
+		if stream {
+			result, err = runner.RunStream(nil, "version")
+		} else {
+			result, err = runner.Run("version")
+		}
+		if err != nil || result.ExitCode != 0 || !strings.Contains(result.Stdout, "go version") {
+			t.Fatalf("stream=%v: result=%#v, error=%v", stream, result, err)
+		}
+	}
+}
+
 func TestExecRunner_RunStreamAcceptsLargeLines(t *testing.T) {
 	t.Setenv("LAZYLORE_RUNNER_HELPER_MODE", "large-line")
 	executable, err := os.Executable()

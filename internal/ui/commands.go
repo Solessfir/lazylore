@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"unicode"
@@ -14,24 +15,24 @@ import (
 	"lazylore/internal/lore"
 )
 
-func loadStatusCmd(r lore.Runner) tea.Cmd {
+func loadStatusCmd(r lore.Runner, generation uint64, statusGeneration int) tea.Cmd {
 	return func() tea.Msg {
 		s, err := lore.GetStatus(r)
-		return statusMsg{status: s, err: err}
+		return statusMsg{generation: generation, statusGeneration: statusGeneration, status: s, err: err}
 	}
 }
 
-func loadBranchesCmd(r lore.Runner) tea.Cmd {
+func loadBranchesCmd(r lore.Runner, generation uint64, statusGeneration int) tea.Cmd {
 	return func() tea.Msg {
 		b, err := lore.BranchList(r)
-		return branchesMsg{branches: b, err: err}
+		return branchesMsg{generation: generation, statusGeneration: statusGeneration, branches: b, err: err}
 	}
 }
 
-func loadHistoryCmd(r lore.Runner) tea.Cmd {
+func loadHistoryCmd(r lore.Runner, generation uint64, statusGeneration int) tea.Cmd {
 	return func() tea.Msg {
 		h, err := lore.History(r, 50)
-		return historyMsg{revisions: h, err: err}
+		return historyMsg{generation: generation, statusGeneration: statusGeneration, revisions: h, err: err}
 	}
 }
 
@@ -43,9 +44,9 @@ func loadDiffCmd(r lore.Runner, path string, lock lore.Lock, locked bool, reques
 	return func() tea.Msg {
 		text, err := lore.Diff(r, path)
 		if err != nil {
-			return diffMsg{request: request, err: err}
+			return diffMsg{statusGeneration: -1, request: request, err: err}
 		}
-		return diffMsg{request: request, text: enrichFileDiffText(text, path, lock, locked)}
+		return diffMsg{statusGeneration: -1, request: request, text: enrichFileDiffText(text, path, lock, locked)}
 	}
 }
 
@@ -77,9 +78,9 @@ func loadBranchLogCmd(r lore.Runner, branch string, request mainContentRequest) 
 	return func() tea.Msg {
 		revisions, err := lore.HistoryForBranch(r, branch, 50)
 		if err != nil {
-			return diffMsg{request: request, err: err}
+			return diffMsg{statusGeneration: -1, request: request, err: err}
 		}
-		return diffMsg{request: request, text: formatBranchLog(revisions), raw: true}
+		return diffMsg{statusGeneration: -1, request: request, text: formatBranchLog(revisions), raw: true}
 	}
 }
 
@@ -89,17 +90,17 @@ func loadBranchLogCmd(r lore.Runner, branch string, request mainContentRequest) 
 func loadRevisionPatchCmd(r lore.Runner, parent, revision string, request mainContentRequest) tea.Cmd {
 	return func() tea.Msg {
 		if parent == "" {
-			return diffMsg{request: request, text: "Initial revision - no parent to diff against.", raw: true}
+			return diffMsg{statusGeneration: -1, request: request, text: "Initial revision - no parent to diff against.", raw: true}
 		}
 		text, err := lore.DiffRevision(r, parent, revision)
-		return diffMsg{request: request, text: text, err: err}
+		return diffMsg{statusGeneration: -1, request: request, text: text, err: err}
 	}
 }
 
-func loadLocksCmd(r lore.Runner, paths []string) tea.Cmd {
+func loadLocksCmd(r lore.Runner, paths []string, requestID uint64) tea.Cmd {
 	return func() tea.Msg {
 		locks, err := lore.LockStatus(r, paths...)
-		return locksMsg{locks: locks, err: err}
+		return locksMsg{requestID: requestID, locks: locks, err: err}
 	}
 }
 
@@ -144,24 +145,19 @@ func lockToggleCmd(r lore.Runner, path string, locked bool) tea.Cmd {
 		opKey := "lock:" + path
 		if locked {
 			_, err := lore.LockRelease(rr, path)
-			return actionDoneMsg{label: "Unlock file", err: err, opKey: opKey, commands: rr.commands,
+			return actionDoneMsg{statusGeneration: -1, label: "Unlock file", err: err, opKey: opKey, commands: rr.commands,
 				revert:  func(m *Model) { m.setFileLockedByPath(path, true) },
 				confirm: func(m *Model) { delete(m.locks, path) },
 			}
 		}
 		_, err := lore.LockAcquire(rr, path)
-		return actionDoneMsg{label: "Lock file", err: err, opKey: opKey, commands: rr.commands,
+		return actionDoneMsg{statusGeneration: -1, label: "Lock file", err: err, opKey: opKey, commands: rr.commands,
 			revert: func(m *Model) { m.setFileLockedByPath(path, false) },
 			confirm: func(m *Model) {
 				if m.locks == nil {
 					m.locks = map[string]lore.Lock{}
 				}
-				// m.currentUserID is "" whenever lore auth info can't resolve an
-				// identity (see project_lazylore_lock_owner_todo memory) - the
-				// real lock status the next refresh fetches will report the
-				// server's own "<unknown>" placeholder for that case, so use
-				// the same placeholder here rather than a blank owner ("Locked
-				// by " with nothing after it).
+				// Match Lore's anonymous owner while identity lookup is unavailable.
 				owner := m.currentUserID
 				if owner == "" {
 					owner = "<unknown>"
@@ -181,7 +177,7 @@ func lockForceReleaseCmd(r lore.Runner, path string) tea.Cmd {
 		rr := &runRecorder{inner: r}
 		opKey := "lock:" + path
 		_, err := lore.LockReleaseForce(rr, path)
-		return actionDoneMsg{label: "Force-unlock file", err: err, opKey: opKey, commands: rr.commands,
+		return actionDoneMsg{statusGeneration: -1, label: "Force-unlock file", err: err, opKey: opKey, commands: rr.commands,
 			revert:  func(m *Model) { m.setFileLockedByPath(path, true) },
 			confirm: func(m *Model) { delete(m.locks, path) },
 		}
@@ -192,7 +188,7 @@ func stageCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
 		_, err := lore.Stage(rr, path)
-		return actionDoneMsg{label: "Stage file", err: err, opKey: "stage:" + path, commands: rr.commands,
+		return actionDoneMsg{statusGeneration: -1, label: "Stage file", err: err, opKey: "stage:" + path, commands: rr.commands,
 			revert: func(m *Model) { m.setFileStagedByPath(path, true, false) }}
 	}
 }
@@ -201,7 +197,7 @@ func unstageCmd(r lore.Runner, path string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
 		_, err := lore.Unstage(rr, path)
-		return actionDoneMsg{label: "Unstage file", err: err, opKey: "stage:" + path, commands: rr.commands,
+		return actionDoneMsg{statusGeneration: -1, label: "Unstage file", err: err, opKey: "stage:" + path, commands: rr.commands,
 			revert: func(m *Model) { m.setFileStagedByPath(path, false, true) }}
 	}
 }
@@ -210,22 +206,39 @@ func unstageCmd(r lore.Runner, path string) tea.Cmd {
 // failed call reverts every optimistically-updated row under it, not just
 // one path. dirPath is the fileItem-space prefix ("" for the root row);
 // lorePath is the actual lore CLI argument ("." for the root row).
-func dirStageCmd(r lore.Runner, dirPath, lorePath string) tea.Cmd {
+func dirStageCmd(r lore.Runner, dirPath, lorePath string, changes map[lore.FileChange]bool) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
 		_, err := lore.Stage(rr, lorePath)
-		return actionDoneMsg{label: "Stage folder", err: err, opKey: "stage:" + lorePath, commands: rr.commands,
-			revert: func(m *Model) { m.setDirStagedByPrefix(dirPath, true, false) }}
+		return actionDoneMsg{statusGeneration: -1, label: "Stage folder", err: err, opKey: "stage:" + lorePath, commands: rr.commands,
+			revert: func(m *Model) { m.moveDirectoryStatus(dirPath, true, false, changes) }}
 	}
 }
 
-func dirUnstageCmd(r lore.Runner, dirPath, lorePath string) tea.Cmd {
+func dirUnstageCmd(r lore.Runner, dirPath, lorePath string, changes map[lore.FileChange]bool) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
 		_, err := lore.Unstage(rr, lorePath)
-		return actionDoneMsg{label: "Unstage folder", err: err, opKey: "stage:" + lorePath, commands: rr.commands,
-			revert: func(m *Model) { m.setDirStagedByPrefix(dirPath, false, true) }}
+		return actionDoneMsg{statusGeneration: -1, label: "Unstage folder", err: err, opKey: "stage:" + lorePath, commands: rr.commands,
+			revert: func(m *Model) { m.moveDirectoryStatus(dirPath, false, true, changes) }}
 	}
+}
+
+func validateDiscardPaths(repoRoot string, paths []string) error {
+	for _, path := range paths {
+		info, err := os.Stat(filepath.Join(repoRoot, path))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("cannot check discard path %q: %w", path, err)
+		}
+		// Lore recursively resets directories even when the prompt captured a file.
+		if info.IsDir() {
+			return fmt.Errorf("cannot discard %q: it is now a directory; refresh and confirm its files", path)
+		}
+	}
+	return nil
 }
 
 // discardUnstagedInDirCmd discards only the given paths - the unstaged
@@ -233,19 +246,25 @@ func dirUnstageCmd(r lore.Runner, dirPath, lorePath string) tea.Cmd {
 // elsewhere under that directory untouched. Staging in lore is
 // all-or-nothing per file, so this only makes sense at directory
 // granularity, never for a single file.
-func discardUnstagedInDirCmd(r lore.Runner, paths []string) tea.Cmd {
+func discardUnstagedInDirCmd(r lore.Runner, repoRoot string, paths []string) tea.Cmd {
 	return func() tea.Msg {
+		if err := validateDiscardPaths(repoRoot, paths); err != nil {
+			return actionDoneMsg{statusGeneration: -1, label: "Discard unstaged changes", err: err}
+		}
 		rr := &runRecorder{inner: r}
-		_, err := lore.DiscardAllChanges(rr, paths)
-		return actionDoneMsg{label: "Discard unstaged changes", err: err, commands: rr.commands}
+		_, err := lore.DiscardUnstagedChanges(rr, paths)
+		return actionDoneMsg{statusGeneration: -1, label: "Discard unstaged changes", err: err, commands: rr.commands}
 	}
 }
 
-func discardAllCmd(r lore.Runner, paths []string) tea.Cmd {
+func discardAllCmd(r lore.Runner, repoRoot string, paths []string) tea.Cmd {
 	return func() tea.Msg {
+		if err := validateDiscardPaths(repoRoot, paths); err != nil {
+			return actionDoneMsg{statusGeneration: -1, label: "Discard all changes", err: err}
+		}
 		rr := &runRecorder{inner: r}
 		_, err := lore.DiscardAllChanges(rr, paths)
-		return actionDoneMsg{label: "Discard all changes", err: err, commands: rr.commands}
+		return actionDoneMsg{statusGeneration: -1, label: "Discard all changes", err: err, commands: rr.commands}
 	}
 }
 
@@ -263,7 +282,15 @@ func editorCommand(absPath string) (*exec.Cmd, error) {
 		if runtime.GOOS == "windows" {
 			editor = "notepad"
 		} else {
-			editor = "vi"
+			for _, candidate := range []string{"vi", "vim", "nvim", "nano"} {
+				if _, err := exec.LookPath(candidate); err == nil {
+					editor = candidate
+					break
+				}
+			}
+			if editor == "" {
+				return nil, fmt.Errorf("no editor found on PATH; set VISUAL or EDITOR")
+			}
 		}
 	}
 	fields, err := splitEditorCommand(editor)
@@ -350,15 +377,15 @@ func commitCmd(r lore.Runner, message string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
 		_, err := lore.Commit(rr, message)
-		return actionDoneMsg{label: "Commit", err: err, commands: rr.commands}
+		return actionDoneMsg{statusGeneration: -1, label: "Commit", err: err, commands: rr.commands}
 	}
 }
 
-func pullCmd(r lore.Runner) tea.Cmd {
+func pullCmd(r lore.Runner, syncGeneration int) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
 		_, err := lore.Pull(rr)
-		return actionDoneMsg{label: "Pull", err: err, commands: rr.commands}
+		return actionDoneMsg{statusGeneration: -1, label: "Pull", err: err, commands: rr.commands, syncGeneration: syncGeneration}
 	}
 }
 
@@ -369,7 +396,7 @@ func pullCmd(r lore.Runner) tea.Cmd {
 // time via readPushChan/pushChanMsg (see Update's handling of it), which
 // re-issues the read after every line until the final actionDoneMsg closes
 // the channel.
-func pushStreamCmd(r lore.Runner) tea.Cmd {
+func pushStreamCmd(r lore.Runner, syncGeneration int) tea.Cmd {
 	ch := make(chan tea.Msg, 64)
 	go func() {
 		rr := &runRecorder{inner: r}
@@ -386,7 +413,7 @@ func pushStreamCmd(r lore.Runner) tea.Cmd {
 				}
 			}
 		})
-		terminal := actionDoneMsg{label: "Push", err: err, commands: rr.commands, liveStreamed: true}
+		terminal := actionDoneMsg{statusGeneration: -1, label: "Push", err: err, commands: rr.commands, liveStreamed: true, syncGeneration: syncGeneration}
 		for {
 			select {
 			case ch <- terminal:
@@ -419,7 +446,7 @@ func switchBranchCmd(r lore.Runner, name string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
 		_, err := lore.SwitchBranch(rr, name)
-		return actionDoneMsg{label: "Checkout branch", err: err, commands: rr.commands}
+		return actionDoneMsg{statusGeneration: -1, label: "Checkout branch", err: err, commands: rr.commands}
 	}
 }
 
@@ -427,7 +454,7 @@ func createBranchCmd(r lore.Runner, name string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
 		_, err := lore.CreateBranch(rr, name)
-		return actionDoneMsg{label: "Create branch", err: err, commands: rr.commands}
+		return actionDoneMsg{statusGeneration: -1, label: "Create branch", err: err, commands: rr.commands}
 	}
 }
 
@@ -435,7 +462,7 @@ func resetBranchCmd(r lore.Runner, revision, label string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
 		_, err := lore.ResetBranchTo(rr, revision)
-		return actionDoneMsg{label: label, err: err, commands: rr.commands}
+		return actionDoneMsg{statusGeneration: -1, label: label, err: err, commands: rr.commands}
 	}
 }
 
@@ -443,7 +470,7 @@ func mergeBranchCmd(r lore.Runner, name, label string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
 		_, err := lore.MergeBranch(rr, name)
-		return actionDoneMsg{label: label, err: err, commands: rr.commands}
+		return actionDoneMsg{statusGeneration: -1, label: label, err: err, commands: rr.commands}
 	}
 }
 
@@ -451,7 +478,7 @@ func syncToCmd(r lore.Runner, revision, label string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
 		_, err := lore.SyncTo(rr, revision)
-		return actionDoneMsg{label: label, err: err, commands: rr.commands}
+		return actionDoneMsg{statusGeneration: -1, label: label, err: err, commands: rr.commands}
 	}
 }
 
@@ -459,6 +486,6 @@ func revertCmd(r lore.Runner, revision, message, label string) tea.Cmd {
 	return func() tea.Msg {
 		rr := &runRecorder{inner: r}
 		_, err := lore.RevertRevision(rr, revision, message)
-		return actionDoneMsg{label: label, err: err, commands: rr.commands}
+		return actionDoneMsg{statusGeneration: -1, label: label, err: err, commands: rr.commands}
 	}
 }

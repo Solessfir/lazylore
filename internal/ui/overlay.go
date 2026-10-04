@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // This file is a near-verbatim port of lazyp4's internal/ui/overlay.go
@@ -69,66 +70,21 @@ func spliceLine(x int, fg, bg string) string {
 
 // ansiTruncate truncates s to maxWidth visible columns, preserving ANSI sequences.
 func ansiTruncate(s string, maxWidth int) string {
-	if maxWidth <= 0 {
-		return ""
-	}
-	var buf strings.Builder
-	col := 0
-	runes := []rune(s)
-	for i := 0; i < len(runes); {
-		if runes[i] == '\033' {
-			buf.WriteRune('\033')
-			i++
-			for i < len(runes) {
-				buf.WriteRune(runes[i])
-				end := isAnsiEnd(runes[i])
-				i++
-				if end {
-					break
-				}
-			}
-			continue
-		}
-		if col >= maxWidth {
-			break
-		}
-		buf.WriteRune(runes[i])
-		col++
-		i++
-	}
-	return buf.String()
+	return ansi.Truncate(s, max(0, maxWidth), "")
 }
 
 // ansiSkip skips the first skipCols visible columns and returns the rest (without ANSI codes).
 func ansiSkip(s string, skipCols int) string {
-	plain := ansiStrip(s)
-	runes := []rune(plain)
-	if skipCols >= len(runes) {
-		return ""
+	plain := ansi.Strip(s)
+	right := ansi.TruncateLeft(plain, max(0, skipCols), "")
+	if excess := lipgloss.Width(right) - max(0, lipgloss.Width(plain)-skipCols); excess > 0 {
+		// A wide glyph crossing the cut cannot be rendered as a partial cell.
+		cluster, width := ansi.FirstGraphemeCluster(right, ansi.GraphemeWidth)
+		right = strings.Repeat(" ", width-excess) + right[len(cluster):]
 	}
-	return string(runes[skipCols:])
+	return right
 }
 
 func ansiStrip(s string) string {
-	var buf strings.Builder
-	runes := []rune(s)
-	for i := 0; i < len(runes); {
-		if runes[i] == '\033' {
-			i++
-			for i < len(runes) && !isAnsiEnd(runes[i]) {
-				i++
-			}
-			i++ // skip terminator
-			continue
-		}
-		buf.WriteRune(runes[i])
-		i++
-	}
-	return buf.String()
-}
-
-// isAnsiEnd returns true if r is the final byte of a CSI escape sequence.
-// '[' (0x5B) is excluded because it is the CSI introducer, not a terminator.
-func isAnsiEnd(r rune) bool {
-	return r >= 0x40 && r <= 0x7E && r != '['
+	return ansi.Strip(s)
 }

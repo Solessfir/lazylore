@@ -5,10 +5,12 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"lazylore/internal/lore"
 )
@@ -156,12 +158,22 @@ func selectedRowStyle(width int) lipgloss.Style {
 	return lipgloss.NewStyle().Background(selectedBg).Bold(true).Width(width)
 }
 
+func singleLineDisplay(text string) string {
+	return strings.Map(func(char rune) rune {
+		if unicode.IsControl(char) {
+			return '\ufffd'
+		}
+		return char
+	}, text)
+}
+
 func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	fi, ok := listItem.(fileItem)
 	if !ok {
 		return
 	}
 	indent := strings.Repeat("  ", fi.depth)
+	label := singleLineDisplay(fi.label)
 	selected := d.focused && index == m.Index()
 
 	if !selected {
@@ -174,21 +186,21 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 			if fi.collapsed {
 				arrow = "▶"
 			}
-			display := indent + arrow + " " + fi.label
+			display := indent + arrow + " " + label
 			if fi.allStaged {
 				display = fileNameStyle(true).Render(display)
 			}
-			fmt.Fprint(w, clip.Render(display))
+			fmt.Fprint(w, clip.Render(ansi.Truncate(display, m.Width(), "…")))
 			return
 		}
 		// File, not selected: apply per-part colors (status red/green, name color for staged)
 		statusStyle := lipgloss.NewStyle().Foreground(fileStatusColor(fi.staged))
 		nameStyle := fileNameStyle(fi.staged)
-		line := indent + statusStyle.Render(string(fi.change.Status)) + " " + nameStyle.Render(fi.label)
+		line := indent + statusStyle.Render(string(fi.change.Status)) + " " + nameStyle.Render(label)
 		if fi.locked {
 			line += " " + lockBadgeStyle(fi.lockedByMe).Render(lockBadge)
 		}
-		fmt.Fprint(w, clip.Render(line))
+		fmt.Fprint(w, clip.Render(ansi.Truncate(line, m.Width(), "…")))
 		return
 	}
 
@@ -207,8 +219,8 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		if fi.allStaged {
 			style = style.Foreground(fileStagedColor)
 		}
-		display := indent + arrow + " " + fi.label
-		fmt.Fprint(w, style.Render(display))
+		display := indent + arrow + " " + label
+		fmt.Fprint(w, style.Render(ansi.Truncate(display, rowWidth, "…")))
 		return
 	}
 
@@ -230,13 +242,13 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	colored := selSpace.Render(indent) +
 		statStyle.Render(string(fi.change.Status)) +
 		selSpace.Render(" ") +
-		nameStyle.Render(fi.label)
+		nameStyle.Render(label)
 	if fi.locked {
 		colored += selSpace.Render(" ") + lockBadgeStyle(fi.lockedByMe).Background(selectedBg).Render(lockBadge)
 	}
 
 	// selectedRowStyle ensures full-width background fill (including gutter area)
-	fmt.Fprint(w, selectedRowStyle(rowWidth).Render(colored))
+	fmt.Fprint(w, selectedRowStyle(rowWidth).Render(ansi.Truncate(colored, rowWidth, "…")))
 }
 
 // statusToItems flattens a Status's changed files into a directory tree
@@ -419,7 +431,7 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 	// cyan recency prefix ("3d"). Title split (Local/Remotes) handled at
 	// panel title level.
 	if bi, ok := listItem.(branchItem); ok {
-		name := bi.branch.Name
+		name := singleLineDisplay(bi.branch.Name)
 
 		green := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
 		white := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
@@ -445,9 +457,9 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 			// Full selection background (blue) across the row for the entire
 			// branch line, including the cyan recency part. Matches the
 			// fileDelegate pattern to ensure "full ... filled selection".
-			fmt.Fprint(w, selectedRowStyle(d.width).Render(display))
+			fmt.Fprint(w, selectedRowStyle(d.width).Render(ansi.Truncate(display, contentW, "…")))
 		} else {
-			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).Render(display))
+			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).Render(ansi.Truncate(display, contentW, "…")))
 		}
 		return
 	}
@@ -468,10 +480,9 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 		if author == "" {
 			author = "unknown"
 		}
-		if len(author) > 10 {
-			author = author[:10]
-		}
-		msg := ri.revision.Message
+		author = ansi.Truncate(singleLineDisplay(author), 10, "")
+		msg, _, _ := strings.Cut(ri.revision.Message, "\n")
+		msg = singleLineDisplay(msg)
 
 		hashColor := fileStagedColor // green
 		if ri.unpushed {
@@ -498,9 +509,9 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 			msgStyle.Render(msg)
 
 		if selected {
-			fmt.Fprint(w, selectedRowStyle(d.width).Render(display))
+			fmt.Fprint(w, selectedRowStyle(d.width).Render(ansi.Truncate(display, contentW, "…")))
 		} else {
-			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).Render(display))
+			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).Render(ansi.Truncate(display, contentW, "…")))
 		}
 		return
 	}
@@ -508,11 +519,11 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 	// Generic (other): use Title()
 	title := ""
 	if it, ok := listItem.(interface{ Title() string }); ok {
-		title = it.Title()
+		title = singleLineDisplay(it.Title())
 	}
 	if selected {
-		fmt.Fprint(w, selectedRowStyle(d.width).Render(title))
+		fmt.Fprint(w, selectedRowStyle(d.width).Render(ansi.Truncate(title, contentW, "…")))
 	} else {
-		fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).Render(title))
+		fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).Render(ansi.Truncate(title, contentW, "…")))
 	}
 }

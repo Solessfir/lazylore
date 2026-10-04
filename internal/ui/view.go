@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Basic 16-color ANSI codes only (0-15) - the one palette every terminal
@@ -120,9 +122,54 @@ func aheadBehindArrows(ahead, behind int) string {
 	}
 }
 
+func (m Model) layoutFits() bool {
+	l := m.computeMouseLayout()
+	bottom := keybindBarHeight
+	if footer := m.currentFooter(); footer != "" {
+		bottom += min(footerHeight, lipgloss.Height(footer))
+	}
+	available := m.height - bottom
+	if m.panelWidth < 1 || m.diff.vp.Width < 1 ||
+		l.effFilesH < 1 || l.effBranchesH < 1 || l.effHistoryH < 1 || l.effDiffH < 1 ||
+		l.mainH > available || l.diffH+commandLogPanelHeight > available {
+		return false
+	}
+	modal := ""
+	if m.showHelp {
+		modal = m.renderHelpModal()
+	} else if m.prompt != promptNone {
+		modal = m.renderPromptModal()
+	}
+	return modal == "" || lipgloss.Width(modal) <= m.width && lipgloss.Height(modal) <= m.height
+}
+
+func (m Model) smallTerminalView() string {
+	if m.height <= 0 {
+		return ""
+	}
+	width := max(1, m.width-1)
+	if m.height == 1 {
+		return ansi.Truncate("q:quit - resize terminal", width, "")
+	}
+	return ansi.Truncate("Terminal too small. Resize to show panels.", width, "…") +
+		"\n" + ansi.Truncate("q / ctrl+c - quit", width, "…")
+}
+
+func listPositionCount(items list.Model) string {
+	total := len(items.VisibleItems())
+	current := 0
+	if total > 0 {
+		current = items.Index() + 1
+	}
+	return fmt.Sprintf("%d of %d", current, total)
+}
+
 func (m Model) View() string {
 	if m.width == 0 {
 		return "loading..."
+	}
+	if !m.layoutFits() {
+		return m.smallTerminalView()
 	}
 
 	statusText := aheadBehindArrows(m.status.AheadCount, m.status.BehindCount) +
@@ -130,6 +177,17 @@ func (m Model) View() string {
 		" (" + lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(m.status.Branch) + ")"
 
 	footer := m.currentFooter()
+	if footer != "" {
+		footerLines := strings.Split(footer, "\n")
+		if len(footerLines) > footerHeight {
+			footerLines = footerLines[:footerHeight]
+			footerLines[footerHeight-1] = ansi.Truncate(footerLines[footerHeight-1], max(0, m.width-2), "") + "…"
+		}
+		for i, line := range footerLines {
+			footerLines[i] = ansi.Truncate(line, m.width-1, "…")
+		}
+		footer = strings.Join(footerLines, "\n")
+	}
 
 	// Compute actual footer lines so we can grow the panels to eliminate
 	// artificial gap between panel bottoms and the keybind bar.
@@ -164,10 +222,7 @@ func (m Model) View() string {
 
 	// Re-size widgets for the effective (larger when prompt footer short) content area.
 	// Command log height is fixed (see commandLogPanelHeight).
-	m.files.SetSize(m.panelWidth, max(0, effFilesH))
-	m.branches.SetSize(m.panelWidth, max(0, effBranchesH))
-	m.history.SetSize(m.panelWidth, max(0, effHistoryH))
-	m.diff.vp.Height = max(0, effDiffH)
+	m.syncPanelSizes()
 
 	// Use titled-border rendering so "Status"/"Files" etc. appear in the top
 	// border line itself (╭─[N]─Title────╮), matching lazygit.
@@ -194,9 +249,8 @@ func (m Model) View() string {
 				start := effectiveScrollStart(m.filesScrollOverride, m.files.Index(), filesTotalItems, effFilesH)
 				p = withScrollbar(p, start, filesTotalItems, effFilesH, m.focus == focusFiles)
 			}
-			if m.filesTotal > 0 {
-				cur := m.files.Index() + 1
-				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.filesTotal), m.focus == focusFiles)
+			if len(m.files.Items()) > 0 {
+				p = withBottomCount(p, listPositionCount(m.files), m.focus == focusFiles)
 			}
 			return p
 		}(),
@@ -215,9 +269,8 @@ func (m Model) View() string {
 				v = renderListWindow(m.branches, compactTitleDelegate{focused: m.focus == focusBranches, width: m.panelWidth, syncLabel: syncLabel}, effBranchesH, m.branchesScrollOverride)
 			}
 			p := renderDualTitledPanel(m.focus == focusBranches, m.panelWidth, effBranchesH, "3", "Local branches", "Remotes", !m.showRemoteBranches, v)
-			if m.branchesTotal > 0 {
-				cur := m.branches.Index() + 1
-				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.branchesTotal), m.focus == focusBranches)
+			if len(m.branches.Items()) > 0 {
+				p = withBottomCount(p, listPositionCount(m.branches), m.focus == focusBranches)
 			}
 			return p
 		}(),
@@ -231,9 +284,8 @@ func (m Model) View() string {
 				v = renderListWindow(m.history, compactTitleDelegate{focused: m.focus == focusHistory, width: m.panelWidth}, effHistoryH, m.historyScrollOverride)
 			}
 			p := renderTitledPanel(m.focus == focusHistory, m.panelWidth, effHistoryH, "4", "History", v)
-			if m.historyTotal > 0 {
-				cur := m.history.Index() + 1
-				p = withBottomCount(p, fmt.Sprintf("%d of %d", cur, m.historyTotal), m.focus == focusHistory)
+			if len(m.history.Items()) > 0 {
+				p = withBottomCount(p, listPositionCount(m.history), m.focus == focusHistory)
 			}
 			return p
 		}(),
@@ -284,7 +336,7 @@ func (m Model) View() string {
 		statusPart := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(m.appStatus + " " + spin + " ")
 		keybindText = statusPart + keybindBarText
 	}
-	keybind := keybindBarStyle.Render(keybindText)
+	keybind := keybindBarStyle.Render(ansi.Truncate(keybindText, m.width-1, "…"))
 
 	bottom := keybind
 	if footer != "" {
@@ -296,11 +348,14 @@ func (m Model) View() string {
 	// Prompts, confirmations, and the "?" keybindings list render as a
 	// centered popup on top of the full screen (see modal.go/overlay.go),
 	// matching lazyp4's own modal treatment instead of a cramped footer line.
+	modal := ""
 	if m.showHelp {
-		return overlayCenter(m.renderHelpModal(), full, m.width, m.height)
+		modal = m.renderHelpModal()
+	} else if m.prompt != promptNone {
+		modal = m.renderPromptModal()
 	}
-	if m.prompt != promptNone {
-		return overlayCenter(m.renderPromptModal(), full, m.width, m.height)
+	if modal != "" {
+		return overlayCenter(modal, full, m.width, m.height)
 	}
 
 	return full

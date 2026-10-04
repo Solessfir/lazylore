@@ -39,11 +39,36 @@ func TestWithBottomCount_PadsBothSidesOfCount(t *testing.T) {
 	}
 }
 
+func TestPanelLabelsAndContentStayWithinBounds(t *testing.T) {
+	for _, width := range []int{3, 12, 25} {
+		panels := []string{
+			renderTitledPanel(false, width, 1, "5", "界界界界界界界界界界界界", strings.Repeat("界", 40)+"\nextra"),
+			renderDualTitledPanel(false, width, 1, "3", "Local branches", "Remotes", true, "main"),
+			withBottomCount(renderTitledPanel(false, width, 1, "2", "Files", "a"), "100000 of 100000", false),
+		}
+		for _, panel := range panels {
+			if lipgloss.Width(panel) != width+borderWidth || lipgloss.Height(panel) != 1+borderHeight {
+				t.Fatalf("inner width %d rendered %dx%d: %q", width, lipgloss.Width(panel), lipgloss.Height(panel), panel)
+			}
+		}
+	}
+}
+
 func TestWithScrollbar_NoOpWhenNothingToScroll(t *testing.T) {
 	p := renderTitledPanel(false, 20, 3, "2", "Files", "M a.go\nM b.go\nM c.go")
 	got := withScrollbar(p, 0, 3, 3, false)
 	if got != p {
 		t.Fatal("expected no change when total <= height")
+	}
+}
+
+func TestWithScrollbar_ThumbKeepsItsSizeAtBottom(t *testing.T) {
+	panel := renderTitledPanel(false, 20, 10, "2", "Files", strings.Repeat("row\n", 9)+"row")
+	for _, start := range []int{0, 1} {
+		got := withScrollbar(panel, start, 11, 10, false)
+		if cells := strings.Count(got, "▐"); cells != 10 {
+			t.Fatalf("start %d drew %d thumb cells, want the full 10-cell thumb", start, cells)
+		}
 	}
 }
 

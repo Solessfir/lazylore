@@ -2,6 +2,7 @@ package lore_test
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -13,7 +14,7 @@ func TestLockStatus_ParsesLockedPaths(t *testing.T) {
 	// LoreLockFileStatusBeginEventData{count} + LoreLockFileStatusEventData
 	// per locked path (unlocked paths simply don't appear).
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json lock status a.txt b.txt": {ExitCode: 0, Stdout: `{"tagName":"lockFileStatusBegin","data":{"count":1}}
+		"--json lock status -- a.txt b.txt": {ExitCode: 0, Stdout: `{"tagName":"lockFileStatusBegin","data":{"count":1}}
 {"tagName":"lockFileStatus","data":{"path":"a.txt","owner":"user-123","lockedAt":1750000000000}}
 {"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `},
@@ -70,7 +71,7 @@ func TestLockStatus_BatchesLargePathLists(t *testing.T) {
 
 func TestLockAcquire_BuildsArgs(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json lock acquire a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json lock acquire -- a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	_, err := lore.LockAcquire(fake, "a.txt")
 	if err != nil {
@@ -80,10 +81,32 @@ func TestLockAcquire_BuildsArgs(t *testing.T) {
 
 func TestLockRelease_BuildsArgs(t *testing.T) {
 	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json lock release a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
+		"--json lock release -- a.txt": {ExitCode: 0, Stdout: jsonCompleteSuccess},
 	}}
 	_, err := lore.LockRelease(fake, "a.txt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLockCommands_PreserveLiteralPaths(t *testing.T) {
+	runner := &recordingSuccessRunner{}
+	path := "--force 'quoted'.txt"
+	if _, err := lore.LockStatus(runner, path); err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []func(lore.Runner, string) (lore.Result, error){lore.LockAcquire, lore.LockRelease, lore.LockReleaseForce} {
+		if _, err := run(runner, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := [][]string{
+		{"--json", "lock", "status", "--", path},
+		{"--json", "lock", "acquire", "--", path},
+		{"--json", "lock", "release", "--", path},
+		{"--json", "lock", "release", "--force", "--", path},
+	}
+	if !reflect.DeepEqual(runner.Calls, want) {
+		t.Fatalf("Calls = %#v, want %#v", runner.Calls, want)
 	}
 }

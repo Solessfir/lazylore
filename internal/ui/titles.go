@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // These helpers produce titled borders by post-processing a lipgloss
@@ -55,24 +56,14 @@ func injectTitle(rendered, num, name string, paneWidth int, focused bool) string
 	}
 
 	// Build the left frame part (includes left border char)
-	leftFrame := "╭"
 	namePrefix := "─"
 	if num != "" {
 		namePrefix = "─[" + num + "]─"
 	}
-	leftFrame += namePrefix
-
-	// dash count so full top line matches target width (same logic as original)
-	dashLabel := namePrefix + name
-	innerW := paneWidth - 2
-	dashCount := innerW - len([]rune(dashLabel))
-	if dashCount < 0 {
-		dashCount = 0
-	}
-
-	top := frameStyle.Render(leftFrame) +
-		nameStyle.Render(name) +
-		frameStyle.Render(strings.Repeat("─", dashCount)+"╮")
+	innerW := max(0, paneWidth-2)
+	label := ansi.Truncate(frameStyle.Render(namePrefix)+nameStyle.Render(name), innerW, "")
+	top := frameStyle.Render("╭") + label +
+		frameStyle.Render(strings.Repeat("─", innerW-lipgloss.Width(label))+"╮")
 
 	lines[0] = top
 	return strings.Join(lines, "\n")
@@ -111,21 +102,25 @@ func injectDualTitle(rendered, num, firstName, secondName string, firstActive bo
 		firstStyle, secondStyle = inactiveStyle, activeStyle
 	}
 
-	plainLabel := prefix + firstName + separator + secondName
-	innerW := paneWidth - 2
-	dashCount := innerW - len([]rune(plainLabel))
-	if dashCount < 0 {
-		dashCount = 0
-	}
-
-	top := borderStyle.Render("╭"+prefix) +
-		firstStyle.Render(firstName) +
-		borderStyle.Render(separator) +
-		secondStyle.Render(secondName) +
-		borderStyle.Render(strings.Repeat("─", dashCount)+"╮")
+	innerW := max(0, paneWidth-2)
+	label := ansi.Truncate(borderStyle.Render(prefix)+firstStyle.Render(firstName)+
+		borderStyle.Render(separator)+secondStyle.Render(secondName), innerW, "")
+	top := borderStyle.Render("╭") + label +
+		borderStyle.Render(strings.Repeat("─", innerW-lipgloss.Width(label))+"╮")
 
 	lines[0] = top
 	return strings.Join(lines, "\n")
+}
+
+func dualTitleTabAtColumn(num, firstName, secondName string, paneWidth, column int) (first, ok bool) {
+	start := 1 + lipgloss.Width("─["+num+"]─ ")
+	end := min(paneWidth-1, start+lipgloss.Width(firstName))
+	if column >= start && column < end {
+		return true, true
+	}
+	start += lipgloss.Width(firstName + " - ")
+	end = min(paneWidth-1, start+lipgloss.Width(secondName))
+	return false, column >= start && column < end
 }
 
 // renderTitledPanel renders a bordered panel whose title lives in the top
@@ -141,12 +136,7 @@ func renderTitledPanel(focused bool, width, height int, num, title, content stri
 	// Render the content (lists, diff, or status text) with no title inside.
 	// Lipgloss will add the rounded border around the given w/h.
 	// Trim any leading newlines/blank lines so there is no extra top padding/gap inside the window.
-	content = strings.TrimLeft(content, "\n\r")
-	lines := strings.Split(content, "\n")
-	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
-		lines = lines[1:]
-	}
-	content = strings.Join(lines, "\n")
+	content = fitPanelContent(content, width, height)
 	box := s.Width(width).Height(height).Render(content)
 	// Overwrite the first line with a titled border, e.g. ╭─[1]─Files────╮
 	return injectTitle(box, num, title, 0, focused)
@@ -161,14 +151,23 @@ func renderDualTitledPanel(focused bool, width, height int, num, firstName, seco
 		s = focusedPanelStyle
 	}
 	// Trim any leading newlines/blank lines so there is no extra top padding/gap inside the window.
-	content = strings.TrimLeft(content, "\n\r")
-	lines := strings.Split(content, "\n")
+	content = fitPanelContent(content, width, height)
+	box := s.Width(width).Height(height).Render(content)
+	return injectDualTitle(box, num, firstName, secondName, firstActive, 0, focused)
+}
+
+func fitPanelContent(content string, width, height int) string {
+	lines := strings.Split(strings.TrimLeft(content, "\n\r"), "\n")
 	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
 		lines = lines[1:]
 	}
-	content = strings.Join(lines, "\n")
-	box := s.Width(width).Height(height).Render(content)
-	return injectDualTitle(box, num, firstName, secondName, firstActive, 0, focused)
+	if len(lines) > height {
+		lines = lines[:max(0, height)]
+	}
+	for i, line := range lines {
+		lines[i] = ansi.Truncate(line, max(0, width), "…")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // withBottomCount replaces the bottom border line of a rendered panel with one
@@ -199,6 +198,7 @@ func withBottomCount(rendered, count string, focused bool) string {
 		frameStyle = frameStyle.Bold(true)
 	}
 
+	count = ansi.Truncate(count, max(0, w-4), "…")
 	countW := lipgloss.Width(count)
 	// Right-align count in the bottom border, with one `─` of padding on
 	// both sides so it doesn't touch the preceding dashes or the corner:
@@ -278,13 +278,13 @@ func withScrollbar(rendered string, start, total, height int, focused bool) stri
 	if start > 0 {
 		percent = float64(start) / float64(max(1, total-height))
 	}
-	thumbStart := int(percent * float64(height-1))
 	// Ceiling (not floor) and a 2-row floor - a 1-row thumb on a tall panel
 	// (e.g. height=10, total=92) is barely visible against the track.
 	thumbSize := max(2, int(math.Ceil(float64(height*height)/float64(total))))
 	if thumbSize > height {
 		thumbSize = height
 	}
+	thumbStart := int(percent * float64(height-thumbSize))
 
 	frameCol := borderUnfocused
 	if focused {

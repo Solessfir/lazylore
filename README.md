@@ -47,6 +47,12 @@ on Linux, `~/Library/Application Support/lazylore` on macOS):
 lorePath: C:\custom\path\to\lore.exe
 ```
 
+Relative binary paths resolve from the directory where `lazylore` is launched.
+
+File editing uses `$VISUAL`, then `$EDITOR`. With neither set, Windows uses
+Notepad; Linux and macOS use the first installed editor from `vi`, `vim`,
+`nvim`, and `nano`. Editor commands may include quoted arguments.
+
 ## Keybindings
 
 Global (work regardless of which panel is focused):
@@ -64,6 +70,10 @@ Global (work regardless of which panel is focused):
 | `?` | full keybindings help |
 | `q` / `Ctrl+C` | quit |
 
+Press `Enter` to apply a filter, including zero matches. `Esc` clears it.
+
+When the terminal cannot fit the panels or an open prompt, resize it to continue. Prompts retain their text, and only `q` / `Ctrl+C` remain active while controls are hidden.
+
 Files panel:
 
 | Key | Action |
@@ -75,8 +85,13 @@ Files panel:
 | `c` | commit staged changes (opens a message prompt) |
 | `e` | edit the file in `$VISUAL`/`$EDITOR` |
 | `d` | discard menu (`x` discard all, `u` discard unstaged - folders with a mix of staged/unstaged files only) |
-| `D` | discard ALL changes in the working tree |
+| `D` | confirm discarding changes in the files listed when the prompt opens |
 | `L` | toggle a file lock |
+
+Folder discard captures its file list when the menu opens, preserving later
+changes in other files. Discarding unstaged changes also preserves files that
+become staged while the menu is open.
+If a listed file becomes a directory, discard stops so its new contents stay intact.
 
 Branches panel:
 
@@ -104,3 +119,13 @@ go test ./...                                 # run the test suite
 go vet ./...                                  # static checks
 gofmt -l .                                    # list any unformatted files (gofmt -w . to fix)
 ```
+
+To exercise the real CLI and a disposable local server, set absolute paths
+to matching Epic Lore binaries:
+
+```bash
+LORE_TEST_BINARY=/path/to/lore LORE_TEST_SERVER=/path/to/loreserver go test ./internal/lore -run TestNativeWorkflow -v
+```
+
+The native test creates its own repository, server storage, and configuration,
+and removes them afterward. It is skipped when the binary paths are unset.
