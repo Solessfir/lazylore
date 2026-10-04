@@ -12,7 +12,7 @@ import (
 
 func newHelpInput() textinput.Model {
 	input := textinput.New()
-	input.Prompt = "/ "
+	input.Prompt = "Filter ('@' for keybindings): "
 	input.TextStyle = lipgloss.NewStyle().Foreground(borderFocused)
 	input.PromptStyle = input.TextStyle
 	input.Cursor.Style = input.TextStyle
@@ -22,8 +22,16 @@ func newHelpInput() textinput.Model {
 
 func (m *Model) resizeHelp() {
 	m.helpWidth = m.popupWidth(90)
-	m.helpHeight = min(max(1, len(m.helpRows)), max(3, 3*m.height/4-borderHeight))
-	m.helpInput.Width = max(1, m.helpWidth-20)
+	m.helpHeight = min(max(1, len(m.buildHelpRows())), max(3, 3*m.height/4-borderHeight))
+	width := max(1, m.helpWidth-lipgloss.Width(m.helpInput.Prompt)-1)
+	if m.helpInput.Width != width {
+		value, position := m.helpInput.Value(), m.helpInput.Position()
+		m.helpInput.Width = width
+		// Changing Width alone leaves the text input's scroll offsets stale.
+		m.helpInput.SetValue("")
+		m.helpInput.SetValue(value)
+		m.helpInput.SetCursor(position)
+	}
 }
 
 func (m *Model) filterHelp() {
@@ -35,9 +43,14 @@ func (m *Model) filterHelp() {
 		}
 		var bindings []helpRow
 		var targets []string
+		var sections []helpRow
+		var bindingSections []int
 		for _, row := range rows {
-			if !row.section && !row.blank {
+			if row.section {
+				sections = append(sections, row)
+			} else if !row.blank {
 				bindings = append(bindings, row)
+				bindingSections = append(bindingSections, len(sections)-1)
 				target := row.desc
 				if keysOnly {
 					target = row.key
@@ -45,13 +58,27 @@ func (m *Model) filterHelp() {
 				targets = append(targets, target)
 			}
 		}
-		rows = nil
+		groups := make([][]helpRow, len(sections))
 		if query == "" {
-			rows = bindings
+			for i, binding := range bindings {
+				groups[bindingSections[i]] = append(groups[bindingSections[i]], binding)
+			}
 		} else {
 			for _, match := range list.DefaultFilter(query, targets) {
-				rows = append(rows, bindings[match.Index])
+				section := bindingSections[match.Index]
+				groups[section] = append(groups[section], bindings[match.Index])
 			}
+		}
+		rows = nil
+		for i, section := range sections {
+			if len(groups[i]) == 0 {
+				continue
+			}
+			if len(rows) > 0 {
+				rows = append(rows, helpRow{blank: true})
+			}
+			rows = append(rows, section)
+			rows = append(rows, groups[i]...)
 		}
 	}
 	m.helpRows = rows

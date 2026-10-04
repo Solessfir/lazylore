@@ -317,8 +317,12 @@ func (m Model) renderHelpModal() string {
 		}
 	}
 
-	start := scrollWindowStart(m.helpCursor, len(m.helpRows), m.helpHeight)
-	end := min(len(m.helpRows), start+m.helpHeight)
+	bodyHeight := m.helpHeight
+	if m.helpInput.Focused() {
+		bodyHeight = max(1, bodyHeight-2)
+	}
+	start := scrollWindowStart(m.helpCursor, len(m.helpRows), bodyHeight)
+	end := min(len(m.helpRows), start+bodyHeight)
 
 	var b strings.Builder
 	if len(m.helpRows) == 0 {
@@ -347,13 +351,23 @@ func (m Model) renderHelpModal() string {
 		}
 	}
 
-	box := renderTitledPanel(true, m.helpWidth, m.helpHeight, "", "Keybindings", b.String())
+	content := b.String()
 	if m.helpInput.Focused() {
-		box = withTopRightCount(box, m.helpInput.View(), true)
-	} else {
-		box = withTopRightCount(box, "(Type to filter; @ for keys)", true)
+		content = lipgloss.NewStyle().Height(bodyHeight).Render(content) + "\n" +
+			strings.Repeat("─", m.helpWidth) + "\n" + ansi.Truncate(m.helpInput.View(), m.helpWidth, "")
 	}
-	box = withScrollbar(box, start, len(m.helpRows), m.helpHeight, true)
+	box := renderTitledPanel(true, m.helpWidth, m.helpHeight, "", "Keybindings", content)
+	if m.helpInput.Focused() {
+		lines := strings.Split(box, "\n")
+		lines[bodyHeight+1] = lipgloss.NewStyle().Foreground(borderFocused).Render("├" + strings.Repeat("─", m.helpWidth) + "┤")
+		box = strings.Join(lines, "\n")
+	}
+	const filterHint = "(Type to filter)"
+	if !m.helpInput.Focused() && m.helpWidth >= lipgloss.Width("─Keybindings")+lipgloss.Width(filterHint)+2 {
+		box = withTopRightCount(box, filterHint, true)
+		box = strings.Replace(box, " "+filterHint, "─"+filterHint, 1)
+	}
+	box = withScrollbar(box, start, len(m.helpRows), bodyHeight, true)
 	rank, total := selectableRank(m.helpRows, m.helpCursor)
 	box = withBottomCount(box, fmt.Sprintf("%d of %d", rank, total), true)
 	return box
