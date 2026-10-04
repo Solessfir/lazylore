@@ -19,7 +19,7 @@ func runBatch(cmd tea.Cmd) {
 	if cmd == nil {
 		return
 	}
-	if b, ok := cmd().(tea.BatchMsg); ok {
+	if b, ok := commandResult(cmd).(tea.BatchMsg); ok {
 		for _, sub := range b {
 			runBatch(sub)
 		}
@@ -41,7 +41,7 @@ func TestModel_JumpToBranchesLoadsLogForSelectedBranch(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd after jumping to Branches")
 	}
-	msg := cmd()
+	msg := commandResult(cmd)
 	dm, ok := msg.(diffMsg)
 	if !ok || !dm.raw {
 		t.Fatalf("msg = %#v, want a raw diffMsg (Log content)", msg)
@@ -343,7 +343,7 @@ func TestModel_SmallTerminalAllowsQuit(t *testing.T) {
 		if cmd == nil {
 			t.Fatalf("fallback did not handle quit key %q", key)
 		}
-		if _, ok := cmd().(tea.QuitMsg); !ok {
+		if _, ok := commandResult(cmd).(tea.QuitMsg); !ok {
 			t.Fatalf("fallback key %q did not quit", key)
 		}
 	}
@@ -361,7 +361,7 @@ func TestModel_JumpToHistoryLoadsPatchForSelectedRevision(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd after jumping to History")
 	}
-	msg := cmd()
+	msg := commandResult(cmd)
 	if dm, ok := msg.(diffMsg); !ok || dm.raw {
 		t.Fatalf("msg = %#v, want a non-raw diffMsg (Patch content, diff-colored)", msg)
 	}
@@ -455,11 +455,11 @@ func TestModel_SpaceOnBranchesChecksOutSelectedBranch(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd for space on a branch")
 	}
-	msg := cmd()
+	msg := commandResult(cmd)
 	if b, ok := msg.(tea.BatchMsg); ok && len(b) > 0 {
 		for _, item := range b {
 			if item != nil {
-				if am, ok := item().(actionDoneMsg); ok {
+				if am, ok := commandResult(item).(actionDoneMsg); ok {
 					msg = am
 					break
 				}
@@ -865,11 +865,11 @@ func TestModel_YKeyConfirmsDiscardAllWithPathsKnownWhenPromptOpened(t *testing.T
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd after confirming discard-all")
 	}
-	c := cmd()
+	c := commandResult(cmd)
 	if b, ok := c.(tea.BatchMsg); ok && len(b) > 0 {
 		for _, item := range b {
 			if item != nil {
-				if am, ok := item().(actionDoneMsg); ok {
+				if am, ok := commandResult(item).(actionDoneMsg); ok {
 					c = am
 					break
 				}
@@ -1176,11 +1176,11 @@ func TestModel_XKeyConfirmsDiscardAllAndUnstagesThenResetsPurge(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd after confirming discard")
 	}
-	c := cmd()
+	c := commandResult(cmd)
 	if b, ok := c.(tea.BatchMsg); ok && len(b) > 0 {
 		for _, item := range b {
 			if item != nil {
-				res := item()
+				res := commandResult(item)
 				if am, ok := res.(actionDoneMsg); ok {
 					c = am
 					break

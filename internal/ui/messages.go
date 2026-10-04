@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"time"
-
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -10,24 +8,21 @@ import (
 )
 
 type statusMsg struct {
-	statusGeneration int
-	generation       uint64
-	status           lore.Status
-	err              error
+	generation uint64
+	status     lore.Status
+	err        error
 }
 
 type branchesMsg struct {
-	statusGeneration int
-	generation       uint64
-	branches         []lore.Branch
-	err              error
+	generation uint64
+	branches   []lore.Branch
+	err        error
 }
 
 type historyMsg struct {
-	statusGeneration int
-	generation       uint64
-	revisions        []lore.Revision
-	err              error
+	generation uint64
+	revisions  []lore.Revision
+	err        error
 }
 
 type locksMsg struct {
@@ -58,11 +53,10 @@ type mainContentRequest struct {
 // (History panel). raw skips diff coloring for content that isn't actually
 // diff/patch text (a log listing), see diffModel.SetContentRaw.
 type diffMsg struct {
-	statusGeneration int
-	request          mainContentRequest
-	text             string
-	err              error
-	raw              bool
+	request mainContentRequest
+	text    string
+	err     error
+	raw     bool
 }
 
 // actionDoneMsg reports a background lore command's result. opKey, revert,
@@ -73,18 +67,16 @@ type diffMsg struct {
 // updates any Model-level cache the optimistic flip didn't touch (e.g.
 // m.locks), so a triggered refresh doesn't rebuild from a stale cache.
 type actionDoneMsg struct {
-	statusGeneration int
-	label            string
-	err              error
-	opKey            string
-	revert           func(*Model)
-	confirm          func(*Model)
-	commands         []string // actual lore command line(s) run, for the Command Log (see commandlog.go)
+	label    string
+	err      error
+	opKey    string
+	revert   func(*Model)
+	confirm  func(*Model)
+	commands []string // actual lore command line(s) run, for the Command Log (see commandlog.go)
 	// liveStreamed marks this as the terminal message of a pushStreamCmd -
 	// its Command Log entry was already started via BeginLive and needs
 	// FinishLive, not a second AppendAction (see logResult in model.go).
-	liveStreamed   bool
-	syncGeneration int
+	liveStreamed bool
 }
 
 // pushLineMsg is one live progress line from pushStreamCmd (see
@@ -101,28 +93,4 @@ type pushChanMsg struct {
 
 type editorDoneMsg struct {
 	err error
-}
-
-type tickMsg time.Time
-
-type setAppStatusMsg struct {
-	gen  int
-	text string
-}
-
-// revealStatusMsg is setAppStatusMsg's delayed reveal (see
-// statusRevealDelay in model.go) - it only actually shows the spinner if
-// gen still matches Model.statusGen when it fires, i.e. the action it was
-// scheduled for hasn't finished yet.
-type revealStatusMsg struct {
-	gen  int
-	text string
-}
-
-// revealSyncMsg is branchSyncLabel's delayed reveal, same
-// statusRevealDelay/generation pattern as revealStatusMsg - a pull/push that
-// finishes before the delay elapses never flashes the inline spinner.
-type revealSyncMsg struct {
-	gen   int
-	label string
 }

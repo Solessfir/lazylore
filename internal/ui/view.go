@@ -56,13 +56,10 @@ func keybindBarFor(focus focusPanel) string {
 	}
 }
 
-// truncateKeybindBar: the first " | "-separated entry always shows; each
-// following entry is added only while it still fits width, and the first
-// one that doesn't gets replaced with a trailing " | …" instead of
-// wrapping or getting cut off mid-entry.
+// Keep shortcuts whole, including when even the first entry cannot fit.
 func truncateKeybindBar(bar string, width int) string {
 	if width <= 0 {
-		return bar
+		return ""
 	}
 	const sep = " | "
 	const ellipsis = "…"
@@ -71,8 +68,14 @@ func truncateKeybindBar(bar string, width int) string {
 	length := 0
 	for i, e := range entries {
 		textLen := lipgloss.Width(e)
-		if i > 0 && length+lipgloss.Width(sep)+textLen > width {
-			b.WriteString(sep + ellipsis)
+		prefix := ""
+		if i > 0 {
+			prefix = sep
+		}
+		if length+lipgloss.Width(prefix)+textLen > width {
+			if length+lipgloss.Width(prefix+ellipsis) <= width {
+				b.WriteString(prefix + ellipsis)
+			}
 			break
 		}
 		if i > 0 {
@@ -83,6 +86,39 @@ func truncateKeybindBar(bar string, width int) string {
 		length += textLen
 	}
 	return b.String()
+}
+
+var busyFrames = [...]string{"●∙∙", "∙●∙", "∙∙●", "∙●∙"}
+
+func (m Model) footerText(width int, shortcuts string) string {
+	if width <= 0 {
+		return ""
+	}
+	left := ""
+	if name := m.activityName(); name != "" {
+		dots := busyFrames[m.activityFrame%len(busyFrames)]
+		if width >= lipgloss.Width(dots)+2 {
+			left = ansi.Truncate(name, width-lipgloss.Width(dots)-1, "…") + " " + dots
+		} else {
+			left = ansi.Truncate(dots, width, "")
+		}
+		left = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(left)
+	}
+	remaining := width - lipgloss.Width(left)
+	separator := ""
+	if left != "" {
+		separator = " | "
+		remaining -= lipgloss.Width(separator)
+	}
+	right := truncateKeybindBar(shortcuts, remaining)
+	if m.selectMode {
+		right = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(
+			ansi.Truncate("Select mode - highlight text in your terminal, then press any key to restore mouse", max(0, remaining), "…"))
+	}
+	if right == "" {
+		return left
+	}
+	return left + separator + right
 }
 
 // renderPanel is retained for tests that assert on explicit size behavior.
@@ -148,6 +184,13 @@ func (m Model) smallTerminalView() string {
 		return ""
 	}
 	width := max(1, m.width-1)
+	if m.activityName() != "" {
+		footer := m.footerText(width, "q: quit | ctrl+c: quit")
+		if m.height == 1 {
+			return footer
+		}
+		return ansi.Truncate("Terminal too small. Resize to show panels.", width, "…") + "\n" + footer
+	}
 	if m.height == 1 {
 		return ansi.Truncate("q:quit - resize terminal", width, "")
 	}
@@ -261,12 +304,7 @@ func (m Model) View() string {
 			case m.branches.SettingFilter():
 				v = strings.TrimLeft(m.branches.View(), "\n\r")
 			default:
-				syncLabel := ""
-				if m.branchSyncLabel != "" {
-					spinners := []string{"/", "-", "\\", "|"}
-					syncLabel = m.branchSyncLabel + " " + spinners[m.spinner%4]
-				}
-				v = renderListWindow(m.branches, compactTitleDelegate{focused: m.focus == focusBranches, width: m.panelWidth, syncLabel: syncLabel}, effBranchesH, m.branchesScrollOverride)
+				v = renderListWindow(m.branches, compactTitleDelegate{focused: m.focus == focusBranches, width: m.panelWidth}, effBranchesH, m.branchesScrollOverride)
 			}
 			p := renderDualTitledPanel(m.focus == focusBranches, m.panelWidth, effBranchesH, "3", "Local branches", "Remotes", !m.showRemoteBranches, v)
 			if len(m.branches.Items()) > 0 {
@@ -325,18 +363,7 @@ func (m Model) View() string {
 	}
 	main := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	keybindBarText := truncateKeybindBar(keybindBarFor(m.focus), m.width-2) // -2 padding
-	keybindText := keybindBarText
-	if m.selectMode {
-		keybindText = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).
-			Render("Select mode - highlight text in your terminal, then press any key to restore mouse")
-	} else if m.appStatus != "" {
-		spinners := []string{"/", "-", "\\", "|"}
-		spin := spinners[m.spinner%4]
-		statusPart := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(m.appStatus + " " + spin + " ")
-		keybindText = statusPart + keybindBarText
-	}
-	keybind := keybindBarStyle.Render(ansi.Truncate(keybindText, m.width-1, "…"))
+	keybind := keybindBarStyle.Render(m.footerText(m.width-1, keybindBarFor(m.focus)))
 
 	bottom := keybind
 	if footer != "" {

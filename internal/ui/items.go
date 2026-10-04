@@ -409,9 +409,8 @@ func historyToItems(revisions []lore.Revision, remoteRevisionNumber uint64, hasR
 // Selection highlight is a full-width background only on the focused panel,
 // matching the fileDelegate and lazygit's focused vs inactive selection.
 type compactTitleDelegate struct {
-	focused   bool
-	width     int    // content width for bounding the bg highlight
-	syncLabel string // e.g. "Pulling /" shown after the current branch's name while a pull/push is in flight
+	focused bool
+	width   int // content width for bounding the bg highlight
 }
 
 func (d compactTitleDelegate) Height() int                         { return 1 }
@@ -445,9 +444,6 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 		var display string
 		if bi.branch.Current {
 			display = green.Render("* ") + white.Render(name)
-			if d.syncLabel != "" {
-				display += " " + cyan.Render(d.syncLabel)
-			}
 		} else {
 			rec := branchRecency(bi.branch)
 			display = cyan.Render(rec+" ") + white.Render(name)

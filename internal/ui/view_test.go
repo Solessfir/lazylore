@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"lazylore/internal/lore"
 )
@@ -247,8 +248,6 @@ func TestTruncateKeybindBar_KeepsWholeBarWhenItFits(t *testing.T) {
 }
 
 func TestTruncateKeybindBar_DropsTailEntriesPastWidthWithEllipsis(t *testing.T) {
-	// "Stage: <space>" is 14 cols; width 20 fits it but not " | Commit: c" (12
-	// more cols) on top, so the second entry becomes " | …" instead.
 	bar := "Stage: <space> | Commit: c | Edit: e"
 	got := truncateKeybindBar(bar, 20)
 	want := "Stage: <space> | …"
@@ -257,13 +256,68 @@ func TestTruncateKeybindBar_DropsTailEntriesPastWidthWithEllipsis(t *testing.T) 
 	}
 }
 
-func TestTruncateKeybindBar_AlwaysKeepsFirstEntryEvenWhenNarrowerThanIt(t *testing.T) {
-	// The width check only applies from the second entry onward, so a lone
-	// entry is never itself cut short or given a pointless trailing ellipsis.
-	bar := "Stage: <space>"
-	got := truncateKeybindBar(bar, 3)
-	if got != bar {
-		t.Fatalf("truncateKeybindBar() = %q, want unchanged %q", got, bar)
+func TestTruncateKeybindBar_OnlyCompleteEntriesFit(t *testing.T) {
+	for _, tc := range []struct {
+		width int
+		want  string
+	}{{0, ""}, {3, "…"}, {14, "Stage: <space>"}, {16, "Stage: <space>"}, {18, "Stage: <space> | …"}, {26, "Stage: <space> | Commit: c"}} {
+		got := truncateKeybindBar("Stage: <space> | Commit: c", tc.width)
+		if got != tc.want || lipgloss.Width(got) > tc.width {
+			t.Fatalf("width %d: got %q (%d cells), want %q", tc.width, got, lipgloss.Width(got), tc.want)
+		}
+	}
+}
+
+func TestBusyFooterFramesAndWholeShortcuts(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(activityStartMsg{id: 1, name: "Staging"})
+	m = updated.(Model)
+	for frame, dots := range busyFrames {
+		m.activityFrame = frame
+		got := ansi.Strip(m.footerText(30, "Stage: <space> | Commit: c"))
+		want := "Staging " + dots + " | Stage: <space>"
+		if got != want {
+			t.Fatalf("frame %d: got %q, want %q", frame, got, want)
+		}
+	}
+	for width := 0; width < 45; width++ {
+		got := ansi.Strip(m.footerText(width, "Stage: <space> | Commit: c"))
+		if lipgloss.Width(got) > width {
+			t.Fatalf("width %d: footer overflows: %q", width, got)
+		}
+		for _, entry := range strings.Split(got, " | ")[1:] {
+			if entry != "Stage: <space>" && entry != "Commit: c" && entry != "…" {
+				t.Fatalf("width %d: incomplete shortcut %q", width, entry)
+			}
+		}
+	}
+}
+
+func TestBusyFooterSurvivesModalResizeAndSelectMode(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(activityStartMsg{id: 1, name: "Loading status"})
+	m = updated.(Model)
+	m.prompt = promptCommit
+	m.input.SetValue("pending summary")
+	for _, size := range [][2]int{{120, 40}, {30, 8}, {15, 1}, {120, 40}} {
+		updated, _ = m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		m = updated.(Model)
+		if got := ansi.Strip(m.View()); !strings.Contains(got, busyFrames[m.activityFrame]) {
+			t.Fatalf("size %v: busy footer disappeared: %q", size, got)
+		}
+		if m.input.Value() != "pending summary" || m.prompt != promptCommit {
+			t.Fatal("resize changed the prompt")
+		}
+	}
+	m.prompt = promptNone
+	m.selectMode = true
+	if got := ansi.Strip(m.footerText(120, "Stage: <space>")); !strings.Contains(got, "Loading status ●∙∙") || !strings.Contains(got, "Select mode") {
+		t.Fatalf("select mode hides activity or instructions: %q", got)
+	}
+	updated, _ = m.Update(activityResultMsg{id: 1})
+	m = updated.(Model)
+	if got := ansi.Strip(m.View()); strings.Contains(got, "Loading status") {
+		t.Fatalf("completed activity remains visible: %q", got)
 	}
 }
 

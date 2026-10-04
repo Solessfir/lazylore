@@ -65,7 +65,7 @@ func TestLoadStatusCmd_ReturnsStatusMsg(t *testing.T) {
 {"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `},
 	}}
-	msg := loadStatusCmd(fake, 7, 9)()
+	msg := loadStatusCmd(fake, 7)()
 	sm, ok := msg.(statusMsg)
 	if !ok {
 		t.Fatalf("msg = %#v, want statusMsg", msg)
@@ -73,8 +73,8 @@ func TestLoadStatusCmd_ReturnsStatusMsg(t *testing.T) {
 	if sm.err != nil {
 		t.Fatalf("unexpected error: %v", sm.err)
 	}
-	if sm.generation != 7 || sm.statusGeneration != 9 {
-		t.Fatalf("generations = %d/%d, want 7/9", sm.generation, sm.statusGeneration)
+	if sm.generation != 7 {
+		t.Fatalf("generation = %d, want 7", sm.generation)
 	}
 	if sm.status.Repository != "abc" {
 		t.Fatalf("Repository = %q, want abc", sm.status.Repository)
@@ -88,7 +88,7 @@ func TestLoadBranchesCmd_ReturnsBranchesMsg(t *testing.T) {
 {"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `},
 	}}
-	msg := loadBranchesCmd(fake, 7, 9)()
+	msg := loadBranchesCmd(fake, 7)()
 	bm, ok := msg.(branchesMsg)
 	if !ok {
 		t.Fatalf("msg = %#v, want branchesMsg", msg)
@@ -96,8 +96,8 @@ func TestLoadBranchesCmd_ReturnsBranchesMsg(t *testing.T) {
 	if len(bm.branches) != 2 {
 		t.Fatalf("branches = %+v, want 2 entries", bm.branches)
 	}
-	if bm.generation != 7 || bm.statusGeneration != 9 {
-		t.Fatalf("generations = %d/%d, want 7/9", bm.generation, bm.statusGeneration)
+	if bm.generation != 7 {
+		t.Fatalf("generation = %d, want 7", bm.generation)
 	}
 }
 
@@ -108,7 +108,7 @@ func TestLoadHistoryCmd_ReturnsHistoryMsg(t *testing.T) {
 {"tagName":"complete","data":{"status":0,"error":{"errorCode":0,"message":"","traceLocations":[]}}}
 `},
 	}}
-	msg := loadHistoryCmd(fake, 7, 9)()
+	msg := loadHistoryCmd(fake, 7)()
 	hm, ok := msg.(historyMsg)
 	if !ok {
 		t.Fatalf("msg = %#v, want historyMsg", msg)
@@ -116,8 +116,8 @@ func TestLoadHistoryCmd_ReturnsHistoryMsg(t *testing.T) {
 	if len(hm.revisions) != 1 {
 		t.Fatalf("revisions = %+v, want 1 entry", hm.revisions)
 	}
-	if hm.generation != 7 || hm.statusGeneration != 9 {
-		t.Fatalf("generations = %d/%d, want 7/9", hm.generation, hm.statusGeneration)
+	if hm.generation != 7 {
+		t.Fatalf("generation = %d, want 7", hm.generation)
 	}
 }
 

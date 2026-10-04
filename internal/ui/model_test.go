@@ -135,373 +135,6 @@ func TestModel_ListPaginationMatchesDisplayedRowsWithoutHiddenFilterChrome(t *te
 	}
 }
 
-func TestModel_LateActionStartCannotReviveCompletedSpinner(t *testing.T) {
-	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json stage -- a.txt": {Stdout: jsonCompleteSuccess},
-		"--json status --scan": {Stdout: `{"tagName":"repositoryStatusRevision","data":{"branchName":"main"}}
-{"tagName":"repositoryStatusFile","data":{"path":"a.txt","action":"modify","type":"file","flagStaged":true,"flagDirty":true}}
-` + jsonCompleteSuccess},
-		"--json branch list":          {Stdout: jsonCompleteSuccess},
-		"--json history 50":           {Stdout: jsonCompleteSuccess},
-		"--json diff -- a.txt":        {Stdout: jsonCompleteSuccess},
-		"--json lock status -- a.txt": {Stdout: jsonCompleteSuccess},
-	}}
-	m := NewModel(fake, "repo", "/repo")
-	m.status.Unstaged = []lore.FileChange{{Status: 'M', Path: "a.txt"}}
-	m.rebuildFileItems()
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m = updated.(Model)
-	var lateStart setAppStatusMsg
-	var completion actionDoneMsg
-	for _, sub := range cmd().(tea.BatchMsg) {
-		switch msg := sub().(type) {
-		case setAppStatusMsg:
-			lateStart = msg
-		case actionDoneMsg:
-			completion = msg
-		}
-	}
-	if lateStart.text != "Staging..." || completion.err != nil {
-		t.Fatalf("missing real stage messages: start=%v completion=%v", lateStart, completion.err)
-	}
-	var drain func(tea.Cmd)
-	drain = func(cmd tea.Cmd) {
-		if cmd == nil {
-			return
-		}
-		msg := cmd()
-		if batch, ok := msg.(tea.BatchMsg); ok {
-			for _, sub := range batch {
-				drain(sub)
-			}
-			return
-		}
-		updated, next := m.Update(msg)
-		m = updated.(Model)
-		if _, start := msg.(setAppStatusMsg); !start {
-			drain(next)
-		}
-	}
-	updated, cmd = m.Update(completion)
-	m = updated.(Model)
-	drain(cmd)
-	updated, cmd = m.Update(lateStart)
-	m = updated.(Model)
-	if cmd != nil || m.appStatus != "" || len(m.pendingFileOps) != 0 {
-		t.Fatalf("late start revived completed progress: status=%q pending=%v cmd=%v", m.appStatus, m.pendingFileOps, cmd)
-	}
-}
-
-func TestModel_SyncProgressClearedOnlyByOwningCompletion(t *testing.T) {
-	for _, olderKey := range []string{"p", "P"} {
-		t.Run(olderKey, func(t *testing.T) {
-			fake := &lore.FakeRunner{Results: map[string]lore.Result{
-				"--json sync --remote":  {Stdout: jsonCompleteSuccess},
-				"--json push":           {Stdout: jsonCompleteSuccess},
-				"--json stage -- a.txt": {Stdout: jsonCompleteSuccess},
-			}}
-			m := NewModel(fake, "repo", "/repo")
-			updated, olderCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(olderKey)})
-			m = updated.(Model)
-			olderDone := olderCmd().(tea.BatchMsg)[1]()
-			updated, newerCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
-			m = updated.(Model)
-			newerBatch := newerCmd().(tea.BatchMsg)
-			updated, _ = m.Update(newerBatch[0]())
-			m = updated.(Model)
-			if m.branchSyncLabel != "Pulling" {
-				t.Fatal("newer pull did not show progress")
-			}
-			updated, _ = m.Update(olderDone)
-			m = updated.(Model)
-			if m.branchSyncLabel != "Pulling" || m.pushInFlight {
-				t.Fatalf("older completion changed newer progress or retained push: label=%q push=%v", m.branchSyncLabel, m.pushInFlight)
-			}
-			updated, _ = m.Update(stageCmd(fake, "a.txt")())
-			m = updated.(Model)
-			if m.branchSyncLabel != "Pulling" {
-				t.Fatal("unrelated file completion hid the active pull")
-			}
-			updated, _ = m.Update(newerBatch[1]())
-			m = updated.(Model)
-			if m.branchSyncLabel != "" {
-				t.Fatal("owning pull completion retained its progress")
-			}
-		})
-	}
-}
-
-func TestModel_OlderStageCompletionPreservesNewerStageReveal(t *testing.T) {
-	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json stage -- a.txt": {Stdout: jsonCompleteSuccess},
-		"--json stage -- b.txt": {Stdout: jsonCompleteSuccess},
-	}}
-	m := NewModel(fake, "repo", "/repo")
-	m.status.Unstaged = []lore.FileChange{{Status: 'M', Path: "a.txt"}, {Status: 'M', Path: "b.txt"}}
-	m.rebuildFileItems()
-	m.files.Select(1)
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m = updated.(Model)
-	olderDone := cmd().(tea.BatchMsg)[1]()
-	for i, item := range m.files.Items() {
-		if item.(fileItem).path == "b.txt" {
-			m.files.Select(i)
-			break
-		}
-	}
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m = updated.(Model)
-	newerBatch := cmd().(tea.BatchMsg)
-	updated, reveal := m.Update(newerBatch[0]())
-	m = updated.(Model)
-	updated, cmd = m.Update(olderDone)
-	m = updated.(Model)
-	if cmd != nil {
-		t.Fatal("older stage refreshed while the newer stage was pending")
-	}
-	updated, _ = m.Update(reveal())
-	m = updated.(Model)
-	if m.appStatus != "Staging..." {
-		t.Fatal("older stage invalidated the newer stage's reveal")
-	}
-	updated, _ = m.Update(newerBatch[1]())
-	m = updated.(Model)
-	if m.appStatus != "" {
-		t.Fatal("owning stage retained its progress")
-	}
-}
-
-func TestModel_BackgroundRefreshPreservesNewerActionProgress(t *testing.T) {
-	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json branch switch -- main": {Stdout: jsonCompleteSuccess},
-		"--json status --scan":         {Stdout: jsonCompleteSuccess},
-		"--json branch list":           {Stdout: jsonCompleteSuccess},
-		"--json history 50":            {Stdout: jsonCompleteSuccess},
-	}}
-	m := NewModel(fake, "repo", "/repo")
-	m.focus = focusBranches
-	m.localBranches = []lore.Branch{{Name: "main"}}
-	m.refreshBranchesList()
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m = updated.(Model)
-	olderDone := cmd().(tea.BatchMsg)[1]().(actionDoneMsg)
-	if olderDone.err != nil {
-		t.Fatalf("checkout failed: %v", olderDone.err)
-	}
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m = updated.(Model)
-	newerBatch := cmd().(tea.BatchMsg)
-	updated, reveal := m.Update(newerBatch[0]())
-	m = updated.(Model)
-	updated, refresh := m.Update(olderDone)
-	m = updated.(Model)
-	if refresh == nil {
-		t.Fatal("older checkout did not refresh repository state")
-	}
-	for _, sub := range refresh().(tea.BatchMsg) {
-		msg := sub()
-		if _, ok := msg.(setAppStatusMsg); ok {
-			t.Fatal("background refresh replaced the newer checkout's progress")
-		}
-		updated, _ = m.Update(msg)
-		m = updated.(Model)
-	}
-	updated, _ = m.Update(reveal())
-	m = updated.(Model)
-	if m.appStatus != "Checking out..." {
-		t.Fatal("background loaders invalidated newer checkout progress")
-	}
-	updated, _ = m.Update(newerBatch[1]())
-	m = updated.(Model)
-	if m.appStatus != "" {
-		t.Fatal("owning checkout retained its progress")
-	}
-}
-
-func TestModel_InitialSiblingLoadersPreserveNewerActionProgress(t *testing.T) {
-	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json branch list":           {Stdout: jsonCompleteSuccess},
-		"--json history 50":            {Stdout: jsonCompleteSuccess},
-		"--json branch switch -- main": {Stdout: jsonCompleteSuccess},
-	}}
-	m := NewModel(fake, "repo", "/repo")
-	initial := m.Init()().(tea.BatchMsg)
-	m.focus = focusBranches
-	m.localBranches = []lore.Branch{{Name: "main"}}
-	m.refreshBranchesList()
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m = updated.(Model)
-	updated, reveal := m.Update(cmd().(tea.BatchMsg)[0]())
-	m = updated.(Model)
-	for _, sub := range initial[2:4] {
-		updated, _ = m.Update(sub())
-		m = updated.(Model)
-	}
-	updated, _ = m.Update(reveal())
-	m = updated.(Model)
-	if m.appStatus != "Checking out..." {
-		t.Fatal("initial sibling loaders invalidated newer checkout progress")
-	}
-}
-
-func TestModel_UntrackedCommandsCannotOwnInitialProgress(t *testing.T) {
-	results := map[string]lore.Result{
-		"--json sync --remote":            {Stdout: jsonCompleteSuccess},
-		"--json push":                     {Stdout: jsonCompleteSuccess},
-		"--json diff -- a.txt":            {Stdout: jsonCompleteSuccess},
-		"--json history 50 --branch=main": {Stdout: jsonCompleteSuccess},
-	}
-	for name, command := range map[string]func(lore.Runner) tea.Cmd{
-		"pull":  func(r lore.Runner) tea.Cmd { return pullCmd(r, 1) },
-		"push":  func(r lore.Runner) tea.Cmd { return pushStreamCmd(r, 1) },
-		"diff":  func(r lore.Runner) tea.Cmd { return loadDiffCmd(r, "a.txt", lore.Lock{}, false, mainContentRequest{}) },
-		"log":   func(r lore.Runner) tea.Cmd { return loadBranchLogCmd(r, "main", mainContentRequest{}) },
-		"patch": func(r lore.Runner) tea.Cmd { return loadRevisionPatchCmd(r, "", "root", mainContentRequest{}) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			fake := &lore.FakeRunner{Results: results}
-			m := NewModel(fake, "repo", "/repo")
-			initialStart := m.Init()().(tea.BatchMsg)[0]
-			updated, reveal := m.Update(initialStart())
-			m = updated.(Model)
-			msg := command(fake)()
-			if push, ok := msg.(pushChanMsg); ok {
-				msg = push.inner
-			}
-			switch completion := msg.(type) {
-			case actionDoneMsg:
-				if completion.err != nil {
-					t.Fatalf("native action failed: %v", completion.err)
-				}
-			case diffMsg:
-				if completion.err != nil {
-					t.Fatalf("native content load failed: %v", completion.err)
-				}
-			default:
-				t.Fatalf("unexpected completion %T", msg)
-			}
-			updated, next := m.Update(msg)
-			m = updated.(Model)
-			if next != nil && (name == "pull" || name == "push") {
-				for _, sub := range next().(tea.BatchMsg) {
-					if _, ok := sub().(setAppStatusMsg); ok {
-						t.Fatal("untracked completion started owned refresh progress")
-					}
-				}
-			}
-			updated, _ = m.Update(reveal())
-			m = updated.(Model)
-			if m.appStatus != "Loading..." {
-				t.Fatal("untracked completion cleared initial progress")
-			}
-		})
-	}
-}
-
-func TestModel_SupersededDiffCompletionClearsOwnedProgress(t *testing.T) {
-	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json diff -- a.txt": {Stdout: jsonCompleteSuccess},
-		"--json diff -- b.txt": {Stdout: jsonCompleteSuccess},
-	}}
-	m := NewModel(fake, "repo", "/repo")
-	m.status.Unstaged = []lore.FileChange{{Status: 'M', Path: "a.txt"}, {Status: 'M', Path: "b.txt"}}
-	m.rebuildFileItems()
-	m.files.Select(1)
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = updated.(Model)
-	batch := cmd().(tea.BatchMsg)
-	updated, reveal := m.Update(batch[0]())
-	m = updated.(Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m = updated.(Model)
-	if m.currentDiffPath != "b.txt" {
-		t.Fatal("selection did not supersede the explicit diff")
-	}
-	updated, _ = m.Update(batch[1]())
-	m = updated.(Model)
-	updated, next := m.Update(reveal())
-	m = updated.(Model)
-	if m.appStatus != "" || next != nil {
-		t.Fatal("superseded diff completion retained owned progress")
-	}
-}
-
-func TestModel_SilentRefreshCannotStrandInitialProgress(t *testing.T) {
-	fake := &lore.FakeRunner{Results: map[string]lore.Result{
-		"--json sync --remote": {Stdout: jsonCompleteSuccess},
-		"--json status --scan": {Stdout: jsonCompleteSuccess},
-	}}
-	m := NewModel(fake, "repo", "/repo")
-	initial := m.Init()().(tea.BatchMsg)
-	updated, reveal := m.Update(initial[0]())
-	m = updated.(Model)
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
-	m = updated.(Model)
-	updated, _ = m.Update(cmd().(tea.BatchMsg)[1]())
-	m = updated.(Model)
-	if m.refreshGeneration == 0 {
-		t.Fatal("pull did not invalidate initial repository payloads")
-	}
-	updated, _ = m.Update(initial[1]())
-	m = updated.(Model)
-	updated, next := m.Update(reveal())
-	m = updated.(Model)
-	if m.appStatus != "" || next != nil {
-		t.Fatal("invalidated initial loader stranded its owned progress")
-	}
-}
-
-func TestModel_SetAppStatusMsgDoesNotShowSpinnerImmediately(t *testing.T) {
-	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
-	start := m.appStatusCmd("Staging...")
-	updated, cmd := m.Update(start())
-	m2 := updated.(Model)
-	if m2.appStatus != "" {
-		t.Fatalf("appStatus = %q, want empty until the reveal delay elapses", m2.appStatus)
-	}
-	if cmd == nil {
-		t.Fatal("expected a non-nil Cmd (the delayed reveal)")
-	}
-}
-
-func TestModel_RevealStatusMsgShowsSpinnerWhenStillCurrent(t *testing.T) {
-	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
-	start := m.appStatusCmd("Staging...")
-	updated, _ := m.Update(start())
-	m2 := updated.(Model)
-
-	updated, cmd := m2.Update(revealStatusMsg{gen: m2.statusGen, text: "Staging..."})
-	m3 := updated.(Model)
-	if m3.appStatus != "Staging..." {
-		t.Fatalf("appStatus = %q, want %q", m3.appStatus, "Staging...")
-	}
-	if cmd == nil {
-		t.Fatal("expected a non-nil Cmd to kick off the spinner tick loop")
-	}
-}
-
-func TestModel_RevealStatusMsgSkippedWhenActionAlreadyFinished(t *testing.T) {
-	// A stale reveal (its action already finished) must not re-flash the spinner.
-	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
-	start := m.appStatusCmd("Staging...")
-	updated, _ := m.Update(start())
-	m2 := updated.(Model)
-	staleGen := m2.statusGen
-
-	// Action finishes before the reveal fires.
-	updated, _ = m2.Update(statusMsg{statusGeneration: m2.statusGen, status: lore.Status{Branch: "main"}})
-	m3 := updated.(Model)
-
-	updated, cmd := m3.Update(revealStatusMsg{gen: staleGen, text: "Staging..."})
-	m4 := updated.(Model)
-	if m4.appStatus != "" {
-		t.Fatalf("appStatus = %q, want empty - the reveal was for an action that already finished", m4.appStatus)
-	}
-	if cmd != nil {
-		t.Fatal("expected a nil Cmd for a stale reveal (no spinner tick loop to start)")
-	}
-}
-
 func TestModel_HistoryRecolorsWhenStatusArrivesAfterHistory(t *testing.T) {
 	// statusMsg and historyMsg load independently with no ordering guarantee.
 	// If historyMsg lands first (no remote info yet), a later statusMsg must
@@ -609,7 +242,7 @@ func TestModel_EnsureMainContent_LoadsBranchLogOnce(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd for the first Log load")
 	}
-	msg := cmd()
+	msg := commandResult(cmd)
 	dm, ok := msg.(diffMsg)
 	if !ok || !dm.raw {
 		t.Fatalf("msg = %#v, want a raw diffMsg (Log content, not diff-colored)", msg)
@@ -634,7 +267,7 @@ func TestModel_EnsureMainContent_LoadsRevisionPatchWithParent(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd for the Patch load")
 	}
-	msg := cmd()
+	msg := commandResult(cmd)
 	if dm, ok := msg.(diffMsg); !ok || dm.raw {
 		t.Fatalf("msg = %#v, want a non-raw diffMsg (real diff/patch text, should be diff-colored)", msg)
 	}
@@ -656,7 +289,7 @@ func TestModel_EnsureMainContent_RootRevisionSkipsDiffCall(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd (the 'no parent' message), even though no runner call is made")
 	}
-	msg := cmd()
+	msg := commandResult(cmd)
 	dm, ok := msg.(diffMsg)
 	if !ok || !dm.raw || !strings.Contains(dm.text, "Initial revision") {
 		t.Fatalf("msg = %#v, want a raw diffMsg explaining there's no parent to diff against", msg)
@@ -899,7 +532,7 @@ func applyFilterTestCommand(m *Model, cmd tea.Cmd) {
 	if cmd == nil {
 		return
 	}
-	msg := cmd()
+	msg := commandResult(cmd)
 	if batch, ok := msg.(tea.BatchMsg); ok {
 		for _, sub := range batch {
 			applyFilterTestCommand(m, sub)
@@ -1098,7 +731,7 @@ func TestModel_FilterCommandsKeepImmutableItemsDuringMutation(t *testing.T) {
 					if cmd == nil {
 						return
 					}
-					switch msg := cmd().(type) {
+					switch msg := commandResult(cmd).(type) {
 					case tea.BatchMsg:
 						for _, sub := range msg {
 							execute(sub)
@@ -1196,7 +829,7 @@ func TestModel_FailedStageRefreshesFilteredOptimisticRow(t *testing.T) {
 		if cmd == nil {
 			return
 		}
-		switch msg := cmd().(type) {
+		switch msg := commandResult(cmd).(type) {
 		case tea.BatchMsg:
 			for _, sub := range msg {
 				execute(sub)
@@ -1248,7 +881,7 @@ func TestModel_RefreshDropsOlderResponses(t *testing.T) {
 				}
 			}
 			oldGeneration := m.refreshGeneration
-			m.refreshCmd(true)
+			m.refreshCmd()
 			updated, _ := m.Update(response(m.refreshGeneration, "new", nil))
 			m = updated.(Model)
 			for _, err := range []error{nil, errors.New("old failure")} {
@@ -1314,7 +947,7 @@ func TestModel_LastFailedOperationRefreshesSuccessfulOverlappingStage(t *testing
 		if cmd == nil {
 			return
 		}
-		switch msg := cmd().(type) {
+		switch msg := commandResult(cmd).(type) {
 		case tea.BatchMsg:
 			for _, sub := range msg {
 				execute(sub)
@@ -1368,7 +1001,7 @@ func TestModel_FailedFolderStageRestoresOnlyOptimisticChanges(t *testing.T) {
 					if cmd == nil {
 						return
 					}
-					switch msg := cmd().(type) {
+					switch msg := commandResult(cmd).(type) {
 					case tea.BatchMsg:
 						for _, sub := range msg {
 							execute(sub)
@@ -1468,9 +1101,9 @@ func TestModel_StatusMsgBatchesLockStatusForChangedPaths(t *testing.T) {
 		t.Fatal("expected a non-nil batched Cmd after statusMsg")
 	}
 
-	b, ok := cmd().(tea.BatchMsg)
+	b, ok := commandResult(cmd).(tea.BatchMsg)
 	if !ok {
-		t.Fatalf("cmd() = %#v, want tea.BatchMsg", cmd())
+		t.Fatalf("commandResult(cmd) = %#v, want tea.BatchMsg", commandResult(cmd))
 	}
 	var lm locksMsg
 	found := false
@@ -1478,7 +1111,7 @@ func TestModel_StatusMsgBatchesLockStatusForChangedPaths(t *testing.T) {
 		if sub == nil {
 			continue
 		}
-		if got, ok := sub().(locksMsg); ok {
+		if got, ok := commandResult(sub).(locksMsg); ok {
 			lm, found = got, true
 		}
 	}
@@ -1544,11 +1177,18 @@ func TestModel_LockToggleRejectsEarlierResponses(t *testing.T) {
 				t.Fatal("earlier response undid the optimistic toggle")
 			}
 			var done actionDoneMsg
-			for _, sub := range cmd().(tea.BatchMsg) {
-				if msg, ok := sub().(actionDoneMsg); ok {
+			var execute func(tea.Cmd)
+			execute = func(cmd tea.Cmd) {
+				switch msg := commandResult(cmd).(type) {
+				case tea.BatchMsg:
+					for _, sub := range msg {
+						execute(sub)
+					}
+				case actionDoneMsg:
 					done = msg
 				}
 			}
+			execute(cmd)
 			if done.err != nil || done.opKey == "" {
 				t.Fatalf("lock command did not succeed: %+v", done)
 			}
@@ -1613,12 +1253,12 @@ func TestModel_SpaceOnUnstagedFileDispatchesStageCmd(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd for Space on an unstaged file")
 	}
-	c := cmd()
+	c := commandResult(cmd)
 	// handle if batched with status set
 	if b, ok := c.(tea.BatchMsg); ok && len(b) > 0 {
 		for _, item := range b {
 			if item != nil {
-				res := item()
+				res := commandResult(item)
 				if am, ok := res.(actionDoneMsg); ok {
 					c = am
 					break
@@ -1655,11 +1295,11 @@ func TestModel_EnterOnFileDispatchesLoadDiffCmd(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd for Enter on a file")
 	}
-	c := cmd()
+	c := commandResult(cmd)
 	if b, ok := c.(tea.BatchMsg); ok && len(b) > 0 {
 		for _, item := range b {
 			if item != nil {
-				res := item()
+				res := commandResult(item)
 				if dm, ok := res.(diffMsg); ok {
 					c = dm
 					break
@@ -1697,7 +1337,7 @@ func TestModel_CommitPromptSubmitsMessage(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a non-nil Cmd when submitting the commit prompt")
 	}
-	msg := cmd()
+	msg := commandResult(cmd)
 	am, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("msg = %#v, want actionDoneMsg", msg)

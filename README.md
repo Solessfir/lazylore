@@ -72,6 +72,8 @@ Global (work regardless of which panel is focused):
 
 Press `Enter` to apply a filter, including zero matches. `Esc` clears it.
 
+The bottom-left footer shows the current action or background load with animated dots every 180 ms. Overlapping activities stay tracked until each finishes; the newest appears first, then any earlier activity resumes. Shortcuts beside it appear only when the complete entry fits.
+
 When the terminal cannot fit the panels or an open prompt, resize it to continue. Prompts retain their text, and only `q` / `Ctrl+C` remain active while controls are hidden.
 
 Files panel:

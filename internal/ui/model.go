@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -30,36 +29,25 @@ type Model struct {
 	remoteBranches     []lore.Branch
 	showRemoteBranches bool // for the Branches panel tab (Local vs Remotes)
 
-	appStatus string
-	spinner   int
-	// branchSyncLabel is "Pulling"/"Pushing" while one is in flight, shown
-	// next to the current branch name in the Branches panel (see
-	// compactTitleDelegate.syncLabel), matching lazygit's own indicator.
-	// Only actually set after statusRevealDelay via revealSyncMsg - syncGen
-	// gates that reveal the same way statusGen gates revealStatusMsg.
-	branchSyncLabel string
-	syncGen         int
-	pushInFlight    bool
+	activities             map[uint64]string
+	nextActivityID         uint64
+	activityFrame          int
+	activityTickPending    bool
+	activityTickGeneration uint64
+	pushInFlight           bool
 
 	// pendingCommitAfterStageAll: user confirmed "stage all and commit" from
 	// the promptConfirmStageAllForCommit prompt - opens the commit input
 	// once that stage-all lands (see actionDoneMsg handling), matching
 	// lazygit's own promptToStageAllAndRetry.
 	pendingCommitAfterStageAll bool
-	// statusGen is bumped every time appStatus is set or cleared. A delayed
-	// reveal (see statusRevealDelay) captures the generation it was
-	// scheduled under; if that no longer matches by the time the delay
-	// elapses, the action finished before it was ever worth showing a
-	// spinner for, and the reveal is dropped.
-	statusGen int
-
-	currentDiffPath      string // last file path we issued a diff load for (avoids spamming loads on every cursor move)
-	currentLogBranch     string // last branch we issued a Log load for (Branches panel focused)
-	currentPatchRev      string // last revision we issued a Patch load for (History panel focused)
-	mainContentRequestID uint64
-	lockRequestID        uint64
-	refreshGeneration    uint64
-	filterGenerations    [focusPanelCount]uint64
+	currentDiffPath            string // last file path we issued a diff load for (avoids spamming loads on every cursor move)
+	currentLogBranch           string // last branch we issued a Log load for (Branches panel focused)
+	currentPatchRev            string // last revision we issued a Patch load for (History panel focused)
+	mainContentRequestID       uint64
+	lockRequestID              uint64
+	refreshGeneration          uint64
+	filterGenerations          [focusPanelCount]uint64
 
 	// mainContentSource is which of Files/Branches/History last populated
 	// the shared main panel, so mainPanelTitle() knows what's actually
@@ -521,40 +509,6 @@ func (m *Model) logResult(msg actionDoneMsg) {
 	m.log.AppendAction(msg.label, msg.commands, msg.err)
 }
 
-// clearAppStatus hides the spinner/status line and bumps statusGen so any
-// delayed reveal still in flight for the action that just finished (see
-// statusRevealDelay) gets dropped instead of flashing on screen after the
-// fact.
-func (m *Model) clearAppStatus(generation int) {
-	if generation != m.statusGen {
-		return
-	}
-	m.appStatus = ""
-	m.statusGen++
-}
-
-func (m *Model) appStatusCmd(text string) tea.Cmd {
-	m.statusGen++
-	msg := setAppStatusMsg{gen: m.statusGen, text: text}
-	return func() tea.Msg { return msg }
-}
-
-func (m *Model) appStatusAction(cmd tea.Cmd) tea.Cmd {
-	generation := m.statusGen
-	return func() tea.Msg {
-		switch msg := cmd().(type) {
-		case actionDoneMsg:
-			msg.statusGeneration = generation
-			return msg
-		case diffMsg:
-			msg.statusGeneration = generation
-			return msg
-		default:
-			return msg
-		}
-	}
-}
-
 // setPendingFileOp marks (or clears) a "stage:"/"lock:" + path key as
 // having a background command in flight, guarding optimistic-UI
 // re-entrancy (see pendingFileOps).
@@ -796,16 +750,14 @@ func (m *Model) toggleDirStage(dirPath string) tea.Cmd {
 		optimisticCmd := m.setDirStagedByPrefix(dirPath, false, true)
 		return tea.Batch(
 			optimisticCmd,
-			m.appStatusCmd("Staging..."),
-			m.appStatusAction(dirStageCmd(m.runner, dirPath, lorePath, changes)),
+			m.activityCmd("Staging", dirStageCmd(m.runner, dirPath, lorePath, changes)),
 		)
 	}
 
 	optimisticCmd := m.setDirStagedByPrefix(dirPath, true, false)
 	return tea.Batch(
 		optimisticCmd,
-		m.appStatusCmd("Unstaging..."),
-		m.appStatusAction(dirUnstageCmd(m.runner, dirPath, lorePath, changes)),
+		m.activityCmd("Unstaging", dirUnstageCmd(m.runner, dirPath, lorePath, changes)),
 	)
 }
 
@@ -816,6 +768,8 @@ func NewModel(r lore.Runner, repoName, repoRoot string) Model {
 		repoRoot:       repoRoot,
 		collapsedDirs:  map[string]bool{},
 		pendingFileOps: map[string]bool{},
+		activities:     map[uint64]string{},
+		nextActivityID: 4,
 		// focusFiles is the initial focus, below. width is 0 until the first
 		// resize() - fine, syncFocusDelegates rebuilds these once real
 		// dimensions are known.
@@ -844,39 +798,21 @@ func NewModel(r lore.Runner, repoName, repoRoot string) Model {
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		func() tea.Msg { return setAppStatusMsg{gen: m.statusGen, text: "Loading..."} },
-		loadStatusCmd(m.runner, m.refreshGeneration, m.statusGen),
-		loadBranchesCmd(m.runner, m.refreshGeneration, m.statusGen),
-		loadHistoryCmd(m.runner, m.refreshGeneration, m.statusGen),
-		loadCurrentUserCmd(m.runner),
-		tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg { return tickMsg{} }),
+		startActivityCmd(1, "Loading status", activityResultCmd(1, loadStatusCmd(m.runner, m.refreshGeneration))),
+		startActivityCmd(2, "Loading branches", activityResultCmd(2, loadBranchesCmd(m.runner, m.refreshGeneration))),
+		startActivityCmd(3, "Loading history", activityResultCmd(3, loadHistoryCmd(m.runner, m.refreshGeneration))),
+		startActivityCmd(4, "Loading current user", activityResultCmd(4, loadCurrentUserCmd(m.runner))),
 	)
 }
 
-func (m *Model) refreshCmd(showProgress bool) tea.Cmd {
+func (m *Model) refreshCmd() tea.Cmd {
 	m.refreshGeneration++
-	statusGeneration := -1
-	var start tea.Cmd
-	if showProgress {
-		start = m.appStatusCmd("Refreshing...")
-		statusGeneration = m.statusGen
-	}
 	return tea.Batch(
-		start,
-		loadStatusCmd(m.runner, m.refreshGeneration, statusGeneration),
-		loadBranchesCmd(m.runner, m.refreshGeneration, statusGeneration),
-		loadHistoryCmd(m.runner, m.refreshGeneration, statusGeneration),
+		m.activityCmd("Loading status", loadStatusCmd(m.runner, m.refreshGeneration)),
+		m.activityCmd("Loading branches", loadBranchesCmd(m.runner, m.refreshGeneration)),
+		m.activityCmd("Loading history", loadHistoryCmd(m.runner, m.refreshGeneration)),
 	)
 }
-
-// statusRevealDelay is how long an action must still be running before its
-// "Staging..."/"Refreshing..."/etc spinner actually appears (see
-// setAppStatusMsg/revealStatusMsg in Update). Long enough that fast, local
-// lore calls - especially now that stage/unstage/lock already show instant
-// optimistic feedback - never show it at all; short enough that a genuinely
-// slow action (a big sync, a slow remote) still gets a "please wait" cue
-// promptly.
-const statusRevealDelay = 200 * time.Millisecond
 
 // footerHeight is the number of terminal rows reserved for the prompt /
 // error line (directly above the global keybinding bar). The command log
@@ -1164,7 +1100,7 @@ func (m *Model) ensureMainContent() tea.Cmd {
 		m.currentDiffPath = item.change.Path
 		lock, locked := m.locks[item.change.Path]
 		request := m.beginMainContentRequest(focusFiles, item.change.Path)
-		return loadDiffCmd(m.runner, item.change.Path, lock, locked, request)
+		return m.activityCmd("Loading diff", loadDiffCmd(m.runner, item.change.Path, lock, locked, request))
 
 	case focusBranches:
 		item, ok := m.branches.SelectedItem().(branchItem)
@@ -1177,7 +1113,7 @@ func (m *Model) ensureMainContent() tea.Cmd {
 		}
 		m.currentLogBranch = item.branch.Name
 		request := m.beginMainContentRequest(focusBranches, item.branch.Name)
-		return loadBranchLogCmd(m.runner, item.branch.Name, request)
+		return m.activityCmd("Loading branch log", loadBranchLogCmd(m.runner, item.branch.Name, request))
 
 	case focusHistory:
 		item, ok := m.history.SelectedItem().(revisionItem)
@@ -1194,7 +1130,11 @@ func (m *Model) ensureMainContent() tea.Cmd {
 			parent = ""
 		}
 		request := m.beginMainContentRequest(focusHistory, item.revision.Hash)
-		return loadRevisionPatchCmd(m.runner, parent, item.revision.Hash, request)
+		cmd := loadRevisionPatchCmd(m.runner, parent, item.revision.Hash, request)
+		if parent == "" {
+			return cmd
+		}
+		return m.activityCmd("Loading revision patch", cmd)
 	}
 	return nil
 }
@@ -1221,10 +1161,23 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 	defer func() {
 		if next, ok := updated.(Model); ok {
 			next.syncPanelSizes()
+			if tick := next.activityTickCmd(); tick != nil {
+				cmd = tea.Batch(cmd, tick)
+			}
 			updated = next
 		}
 	}()
 	m.syncPanelSizes()
+	var activityID uint64
+	if result, ok := msg.(activityResultMsg); ok {
+		activityID = result.id
+		msg = result.inner
+		push, streamed := msg.(pushChanMsg)
+		_, progress := push.inner.(pushLineMsg)
+		if !streamed || !progress {
+			delete(m.activities, result.id)
+		}
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -1243,55 +1196,22 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		clampListSelection(lst)
 		return m, tea.Batch(wrapFilterCommand(cmd, msg.source, msg.generation), m.ensureMainContent())
 
-	case tickMsg:
-		if m.appStatus != "" || m.branchSyncLabel != "" {
-			m.spinner = (m.spinner + 1) % 4
-			return m, tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
-				return tickMsg{}
-			})
+	case activityStartMsg:
+		if m.activities == nil {
+			m.activities = map[uint64]string{}
+		}
+		m.activities[msg.id] = msg.name
+		return m, msg.cmd
+
+	case activityTickMsg:
+		if msg.generation != m.activityTickGeneration || !m.activityTickPending {
+			return m, nil
+		}
+		m.activityTickPending = false
+		if len(m.activities) > 0 {
+			m.activityFrame = (m.activityFrame + 1) % 4
 		}
 		return m, nil
-
-	case setAppStatusMsg:
-		if msg.gen != m.statusGen {
-			return m, nil
-		}
-		text := msg.text
-		if text == "" {
-			(&m).clearAppStatus(msg.gen)
-			return m, nil
-		}
-		// Don't show the spinner immediately - most actions (stage/unstage,
-		// lock toggle, the refresh that follows any of them, ...) finish
-		// well under statusRevealDelay, especially now that stage/unstage/
-		// lock already give instant optimistic feedback of their own (see
-		// setFileStagedByPath/setFileLockedByPath). Showing "Staging..."
-		// for one frame and yanking it away read as a flicker, not
-		// information. Only an action that's genuinely still running once
-		// the delay elapses gets a spinner at all.
-		return m, tea.Tick(statusRevealDelay, func(time.Time) tea.Msg {
-			return revealStatusMsg{gen: msg.gen, text: text}
-		})
-
-	case revealStatusMsg:
-		if msg.gen != m.statusGen {
-			// The action this was scheduled for already finished (or was
-			// superseded by a newer one) before the delay elapsed.
-			return m, nil
-		}
-		m.appStatus = msg.text
-		return m, tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
-			return tickMsg{}
-		})
-
-	case revealSyncMsg:
-		if msg.gen != m.syncGen {
-			return m, nil
-		}
-		m.branchSyncLabel = msg.label
-		return m, tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
-			return tickMsg{}
-		})
 
 	case tea.MouseMsg:
 		if !m.layoutFits() {
@@ -1347,7 +1267,6 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		return m.handleKey(msg)
 
 	case statusMsg:
-		(&m).clearAppStatus(msg.statusGeneration)
 		if msg.generation != m.refreshGeneration {
 			return m, nil
 		}
@@ -1363,7 +1282,11 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		setCmd := (&m).rebuildFileItems()
 		diffCmd := (&m).ensureMainContent()
 		m.lockRequestID++
-		lockCmd := loadLocksCmd(m.runner, changedFilePaths(msg.status), m.lockRequestID)
+		paths := changedFilePaths(msg.status)
+		lockCmd := loadLocksCmd(m.runner, paths, m.lockRequestID)
+		if len(paths) > 0 {
+			lockCmd = m.activityCmd("Loading locks", lockCmd)
+		}
 		// statusMsg and historyMsg load independently and can arrive in
 		// either order; rebuild History's unpushed coloring here too so it's
 		// correct even when status lands after history already rendered.
@@ -1371,7 +1294,6 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		return m, tea.Batch(setCmd, diffCmd, lockCmd, historyCmd)
 
 	case branchesMsg:
-		(&m).clearAppStatus(msg.statusGeneration)
 		if msg.generation != m.refreshGeneration {
 			return m, nil
 		}
@@ -1392,7 +1314,6 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		return m, tea.Batch(cmd, (&m).ensureMainContent())
 
 	case historyMsg:
-		(&m).clearAppStatus(msg.statusGeneration)
 		if msg.generation != m.refreshGeneration {
 			return m, nil
 		}
@@ -1431,7 +1352,6 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		return m, (&m).rebuildFileItems()
 
 	case diffMsg:
-		(&m).clearAppStatus(msg.statusGeneration)
 		if msg.request.id != m.mainContentRequestID {
 			return m, nil
 		}
@@ -1466,21 +1386,19 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		switch inner := msg.inner.(type) {
 		case pushLineMsg:
 			m.log.AppendLiveLine(string(inner))
-			return m, readPushChan(msg.ch)
+			read := readPushChan(msg.ch)
+			if activityID != 0 {
+				read = activityResultCmd(activityID, read)
+			}
+			return m, read
 		case actionDoneMsg:
 			return m.Update(inner)
 		}
 		return m, nil
 
 	case actionDoneMsg:
-		ownsStatus := msg.statusGeneration == m.statusGen
 		if strings.HasPrefix(msg.opKey, "lock:") {
 			m.lockRequestID++
-		}
-		(&m).clearAppStatus(msg.statusGeneration)
-		if msg.syncGeneration != 0 && msg.syncGeneration == m.syncGen {
-			m.branchSyncLabel = ""
-			m.syncGen++
 		}
 		if msg.liveStreamed {
 			m.pushInFlight = false
@@ -1503,7 +1421,7 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 			// currentFooter().
 			(&m).logResult(msg)
 			if len(m.pendingFileOps) == 0 {
-				return m, tea.Batch(revertCmd, m.refreshCmd(ownsStatus))
+				return m, tea.Batch(revertCmd, m.refreshCmd())
 			}
 			return m, revertCmd
 		}
@@ -1513,7 +1431,7 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 		if commitAfterStageAll && m.prompt == promptNone {
 			(&m).openCommitPrompt()
 			(&m).logResult(msg)
-			return m, tea.Batch(m.refreshCmd(ownsStatus), textinput.Blink)
+			return m, tea.Batch(m.refreshCmd(), textinput.Blink)
 		}
 		(&m).logResult(msg)
 		if len(m.pendingFileOps) > 0 {
@@ -1527,7 +1445,7 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 			// the one refresh that reflects everything.
 			return m, nil
 		}
-		return m, m.refreshCmd(ownsStatus)
+		return m, m.refreshCmd()
 
 	case editorDoneMsg:
 		if msg.err != nil {
@@ -1535,7 +1453,7 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
-		return m, m.refreshCmd(false)
+		return m, m.refreshCmd()
 	}
 	return m, nil
 }
