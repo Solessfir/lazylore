@@ -162,3 +162,19 @@ LORE_TEST_BINARY=/path/to/lore LORE_TEST_SERVER=/path/to/loreserver go test ./in
 
 The native test creates its own repository, server storage, and configuration,
 and removes them afterward. It is skipped when the binary paths are unset.
+
+## Releases
+
+Pushing a version tag beginning with `v` runs the release workflow. It runs
+tests and vet, then builds Linux, Windows, and macOS binaries for amd64 and
+arm64 and uploads the archives and `checksums.txt` to a GitHub release.
+
+After pushing the changes to GitHub:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Use a new semantic version for each release. GitHub's built-in `GITHUB_TOKEN`
+handles publishing; no additional secret is required.

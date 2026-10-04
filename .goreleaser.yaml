@@ -37,6 +37,7 @@ checksum:
   name_template: "checksums.txt"
 
 release:
+  prerelease: auto
   github:
     owner: Solessfir
     name: lazylore
