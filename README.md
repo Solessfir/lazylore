@@ -4,7 +4,7 @@ A terminal UI for [Lore](https://github.com/EpicGames/lore), Epic Games' open
 source version control system - the same relationship
 [lazygit](https://github.com/jesseduffield/lazygit) has to `git`.
 
-![Screenshot](Screenshot.png)
+![Screenshot](.github/Screenshot.png)
 
 ## Status
 
@@ -178,3 +178,7 @@ git push origin v0.1.0
 
 Use a new semantic version for each release. GitHub's built-in `GITHUB_TOKEN`
 handles publishing; no additional secret is required.
+
+## License
+
+Licensed under the [MIT License](LICENSE).
