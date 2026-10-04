@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/cellbuf"
 )
 
 func TestOverlayPreservesWideAndCombiningBackgroundCells(t *testing.T) {
@@ -20,6 +22,21 @@ func TestOverlayPreservesWideAndCombiningBackgroundCells(t *testing.T) {
 		got := spliceLine(tc.x, "XX", tc.background)
 		if ansiStrip(got) != tc.want || lipgloss.Width(got) != lipgloss.Width(tc.background) {
 			t.Fatalf("overlay %q at %d = %q, want %q", tc.background, tc.x, got, tc.want)
+		}
+	}
+}
+
+func TestOverlayRetainsColoredBackgroundBesidePopup(t *testing.T) {
+	for _, background := range []string{"abcdefgh", "界界界界zz"} {
+		background = "\x1b[31m" + background + "\x1b[0m"
+		got := spliceLine(3, "XX", background)
+		cells := cellbuf.NewBuffer(lipgloss.Width(got), 1)
+		cellbuf.SetContent(cells, got)
+		if !sameSelectionColor(cells.Cell(cells.Width()-1, 0).Style.Fg, ansi.BasicColor(1)) {
+			t.Fatalf("popup erased the background's suffix color: %q", got)
+		}
+		if cells.Cell(3, 0).Style.Fg != nil || cells.Cell(4, 0).Style.Fg != nil {
+			t.Fatal("background styles leaked into popup text")
 		}
 	}
 }

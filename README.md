@@ -4,8 +4,7 @@ A terminal UI for [Lore](https://github.com/EpicGames/lore), Epic Games' open
 source version control system - the same relationship
 [lazygit](https://github.com/jesseduffield/lazygit) has to `git`.
 
-> [!WARNING]
-> This project was built with agentic AI coding (Claude).
+![Screenshot](Screenshot.png)
 
 ## Status
 
@@ -17,20 +16,27 @@ yet.
 
 ## Requirements
 
-- A `lore` binary on your `PATH` (or configured via `lorePath` in
-  `config.yml`, see below).
-- When launched outside a Lore repository, `lazylore` prompts for a remote to
-  clone.
+- A Lore installation discoverable automatically or configured through
+  `lorePath` in `config.yml`, see below.
+- Go 1.24.2 or newer when building from source.
 
 ## Install
 
-Download a release binary from the
-[Releases page](https://github.com/Solessfir/lazylore/releases), or build
-from source:
+Download the archive for your OS and architecture from the
+[Releases page](https://github.com/Solessfir/lazylore/releases), extract
+`lazylore` (`lazylore.exe` on Windows), and place it on your `PATH`.
+
+Or build from source:
 
 ```bash
+git clone https://github.com/Solessfir/lazylore.git
+cd lazylore
 go build -o bin/lazylore ./cmd/lazylore
 ```
+
+Run the executable from a Lore working repository, using its full path if
+it is not on your `PATH`. When launched outside one, it prompts for a remote
+URL and clones into the current directory.
 
 ## Configuration
 
@@ -48,6 +54,11 @@ lorePath: C:\custom\path\to\lore.exe
 ```
 
 Relative binary paths resolve from the directory where `lazylore` is launched.
+On Linux, `$XDG_CONFIG_HOME/lazylore` overrides the default config directory.
+
+Lore handles repository and server configuration. For servers requiring
+authentication, sign in with the Lore CLI before launching; `lazylore` uses
+the existing Lore credentials and environment.
 
 File editing uses `$VISUAL`, then `$EDITOR`. With neither set, Windows uses
 Notepad; Linux and macOS use the first installed editor from `vi`, `vim`,
@@ -55,7 +66,7 @@ Notepad; Linux and macOS use the first installed editor from `vi`, `vim`,
 
 ## Keybindings
 
-Global (work regardless of which panel is focused):
+Global (during normal pane navigation):
 
 | Key | Action |
 |---|---|
@@ -64,13 +75,22 @@ Global (work regardless of which panel is focused):
 | `[` / `]` | cycle Branches sub-tab (Local / Remotes) |
 | `p` / `P` | pull / push the current branch |
 | `/` | filter the focused list |
-| `v` | select mode (release mouse capture to copy text with your terminal) |
+| `v` | select mode (release mouse capture to copy text with your terminal; any key restores capture) |
 | Mouse click | focus a panel / select a row |
-| Mouse wheel | scroll whichever panel is under the cursor, without changing focus or selection |
+| Mouse wheel | scroll the list or diff under the cursor, without changing focus or selection |
 | `?` | full keybindings help |
 | `q` / `Ctrl+C` | quit |
 
 Press `Enter` to apply a filter, including zero matches. `Esc` clears it.
+
+Popups use compact titled borders and contextual footer shortcuts. `Enter`
+confirms and `Esc` cancels; confirmation dialogs also accept `y` and `n`.
+In keybindings help, `Enter` executes the selected binding through its usual
+confirmation and guards. Resizing preserves the selected help row and input text.
+
+Scrollable panes draw their scrollbar on the border. Below 40 terminal rows,
+the command log shrinks to one content row, leaving more room for the main pane.
+Focus the command log with `6` to expand it.
 
 The bottom-left footer shows the current action or background load with animated dots every 180 ms. Overlapping activities stay tracked until each finishes; the newest appears first, then any earlier activity resumes. Shortcuts beside it appear only when the complete entry fits.
 
@@ -86,11 +106,15 @@ Files panel:
 | `Space` | stage / unstage the selected file, or a whole folder recursively |
 | `a` | stage / unstage everything |
 | `Enter` | expand/collapse a folder, or view the selected file's diff |
-| `c` | commit staged changes (opens a message prompt) |
+| `c` | commit staged changes; if none are staged, confirm staging all changes first |
 | `e` | edit the file in `$VISUAL`/`$EDITOR` |
 | `d` | discard menu (`x` discard all, `u` discard unstaged - folders with a mix of staged/unstaged files only) |
 | `D` | confirm discarding changes in the files listed when the prompt opens |
-| `L` | toggle a file lock |
+| `L` | lock / unlock a file; another owner's lock requires force-unlock confirmation |
+
+The discard menu supports Up/Down or `k`/`j`, Enter/Space to execute the selected
+option, and Esc to cancel. Its description follows the selection and explains
+disabled options. The `x` and `u` shortcuts execute their options directly.
 
 Folder discard captures its file list when the menu opens, preserving later
 changes in other files. Discarding unstaged changes also preserves files that
@@ -106,19 +130,24 @@ Branches panel:
 | `g` | reset the current branch to the selected branch |
 | `M` | merge the selected branch into the current branch |
 
+Reset (`g`) moves the current branch's latest revision pointer; it does not
+reset working files.
+
 History panel:
 
 | Key | Action |
 |---|---|
 | `Space` | checkout the selected revision |
-| `d` | drop (revert) the selected revision |
+| `d` | revert the selected revision by creating a new revision |
 | `g` | reset the current branch to the selected revision |
+
+Clean merges and reverts commit automatically. Use the Lore CLI to resolve
+or abort conflicts; the TUI reports them as errors.
 
 ## Development
 
 ```bash
-go build -o bin/lazylore.exe ./cmd/lazylore   # build
-go run ./cmd/lazylore                         # build and run
+go build -o bin/lazylore ./cmd/lazylore       # build
 go test ./...                                 # run the test suite
 go vet ./...                                  # static checks
 gofmt -l .                                    # list any unformatted files (gofmt -w . to fix)

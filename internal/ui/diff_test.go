@@ -59,26 +59,25 @@ func TestNewDiffModel_SetContentDoesNotPanic(t *testing.T) {
 	m.SetContent("some diff text\n")
 }
 
-func TestDiffModel_ViewWithScrollbarPadsColoredLongLinesToExactWidth(t *testing.T) {
+func TestDiffModel_BorderScrollbarKeepsColoredLongLinesWithinPanel(t *testing.T) {
 	// Truncation must be ANSI-aware - a raw rune-count slice through the
 	// middle of an escape code corrupts the terminal's color state for
 	// every row rendered after it.
 	m := newDiffModel(20, 5)
 	m.vp.Width = 20
-	// More lines than the viewport height, so viewWithScrollbar actually
-	// takes the scrollbar-drawing path (its early return for
-	// totalLines <= h skips the pad/truncate loop entirely).
+	// More lines than the viewport height exercises the scrollbar path.
 	var lines []string
 	for i := 0; i < 10; i++ {
 		lines = append(lines, "+"+strings.Repeat("x", 100))
 	}
 	m.SetContent(strings.Join(lines, "\n"))
 
-	out := m.viewWithScrollbar()
+	out := renderTitledPanel(true, m.vp.Width, m.vp.Height, "5", "Patch", m.vp.View())
+	out = withScrollbar(out, m.vp.YOffset, m.totalLines, m.vp.Height, true)
 	for i, line := range strings.Split(out, "\n") {
 		w := lipgloss.Width(line)
-		if w != m.vp.Width+1 { // +1 for the trailing scrollbar track/thumb column
-			t.Fatalf("line %d visible width = %d, want %d (panel width + scrollbar column); line = %q", i, w, m.vp.Width+1, line)
+		if w != m.vp.Width+borderWidth {
+			t.Fatalf("line %d visible width = %d, want %d; line = %q", i, w, m.vp.Width+borderWidth, line)
 		}
 	}
 }
@@ -98,7 +97,9 @@ func TestDiffModel_ScrollbarThumbKeepsItsSizeAtBottom(t *testing.T) {
 	m := newDiffModel(20, 10)
 	m.SetContentRaw(strings.Repeat("row\n", 10) + "row")
 	m.vp.GotoBottom()
-	if cells := strings.Count(m.viewWithScrollbar(), "▐"); cells != 10 {
+	panel := renderTitledPanel(true, m.vp.Width, m.vp.Height, "5", "Patch", m.vp.View())
+	panel = withScrollbar(panel, m.vp.YOffset, m.totalLines, m.vp.Height, true)
+	if cells := strings.Count(panel, "▐"); cells != 10 {
 		t.Fatalf("bottom drew %d thumb cells, want the full 10-cell thumb", cells)
 	}
 }

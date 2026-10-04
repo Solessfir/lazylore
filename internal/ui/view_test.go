@@ -12,6 +12,20 @@ import (
 	"lazylore/internal/lore"
 )
 
+func TestDiscardMenuFooterKeepsBusyIndicatorAndMenuShortcuts(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = updated.(Model)
+	m.prompt = promptDiscardMenu
+	m.pendingDiscardPath = "file.txt"
+	startTestActivity(t, &m, m.activityCmd("Loading history", func() tea.Msg { return nil }))
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	footer := lines[len(lines)-1]
+	if !strings.Contains(footer, "Loading history") || !strings.Contains(footer, "Execute: <enter> | Close/Cancel: <esc>") || strings.Contains(footer, "Stage:") {
+		t.Fatalf("discard footer lost busy state or showed unrelated shortcuts: %q", footer)
+	}
+}
+
 func TestDialogFocusDimsPaneAndRestoresItsHighlight(t *testing.T) {
 	previous := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -90,7 +104,8 @@ func TestViewFitsTerminalAndOnlyReplacesLayoutWhenPanesCannotFit(t *testing.T) {
 		{width: 80, height: 24},
 		{width: 40, height: 24},
 		{width: 120, height: 16},
-		{width: 120, height: 15, tooSmall: true},
+		{width: 120, height: 13},
+		{width: 120, height: 12, tooSmall: true},
 		{width: 80, height: 5, tooSmall: true},
 	} {
 		m := NewModel(&lore.FakeRunner{}, strings.Repeat("界", 40), "/repo")

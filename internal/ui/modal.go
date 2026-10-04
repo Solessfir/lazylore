@@ -8,44 +8,32 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// One universal centered-popup system (see overlay.go) backs every prompt,
-// confirmation, and the keybindings overlay through a single style.
-var (
-	modalBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(borderFocused).
-			Padding(1, 2)
-	modalTitleStyle = lipgloss.NewStyle().Foreground(borderFocused)
-	modalHintStyle  = lipgloss.NewStyle().Foreground(borderFocused)
-)
-
-// renderModal builds a centered popup with a title, body, and optional hints.
-func (m Model) renderModal(title, body, hint string) string {
-	width := 60
-	if m.width > 0 {
-		width = max(1, m.width-modalBoxStyle.GetHorizontalFrameSize())
+// popupWidth matches LazyGit's bounded popup width, excluding the frame.
+func (m Model) popupWidth(maxWidth int) int {
+	terminalWidth := m.width
+	if terminalWidth <= 0 {
+		terminalWidth = 80
 	}
-	title = ansi.Wrap(title, width, "")
+	outerWidth := min(4*terminalWidth/7, maxWidth)
+	if outerWidth < 80 {
+		outerWidth = min(terminalWidth-2, 80)
+	}
+	return max(1, outerWidth-borderWidth)
+}
+
+func (m Model) renderModal(title, body string) string {
+	width := m.popupWidth(80)
 	body = ansi.Wrap(body, width, "")
-	hint = ansi.Wrap(hint, width, "")
 	if m.height > 0 {
-		reserved := modalBoxStyle.GetVerticalFrameSize() + lipgloss.Height(title) + 2
-		if hint != "" {
-			reserved += 2 + lipgloss.Height(hint)
-		}
 		bodyLines := strings.Split(body, "\n")
-		bodyHeight := max(1, m.height-reserved)
+		bodyHeight := max(1, 3*m.height/4-borderHeight)
 		if len(bodyLines) > bodyHeight {
 			bodyLines = bodyLines[:bodyHeight]
 			bodyLines[bodyHeight-1] = ansi.Truncate(bodyLines[bodyHeight-1], width-1, "") + "…"
 			body = strings.Join(bodyLines, "\n")
 		}
 	}
-	content := modalTitleStyle.Render(title) + "\n\n" + body
-	if hint != "" {
-		content += "\n\n" + modalHintStyle.Render(hint)
-	}
-	return modalBoxStyle.Render(content)
+	return renderTitledPanel(true, width, lipgloss.Height(body), "", title, body)
 }
 
 // renderPromptModal renders whichever prompt is currently open (text input
@@ -57,26 +45,26 @@ func (m Model) renderPromptModal() string {
 	case promptCommit:
 		return m.renderCommitModal()
 	case promptConfirmStageAllForCommit:
-		return m.renderModal("No files staged", "You have not staged any files. Commit all files?", "y - confirm   n / esc - cancel")
+		return m.renderModal("No files staged", "You have not staged any files. Commit all files?")
 	case promptNewBranch:
-		if m.width > 0 {
-			m.input.Width = max(1, min(m.input.Width, m.width-modalBoxStyle.GetHorizontalFrameSize()-lipgloss.Width(m.input.Prompt)-1))
-			m.input.SetCursor(m.input.Position())
+		title := "New branch name"
+		if m.status.Branch != "" {
+			title += " (branch is off of '" + singleLineDisplay(m.status.Branch) + "')"
 		}
-		return m.renderModal("New Branch", m.input.View(), "enter - create   esc - cancel")
+		return m.renderInputModal(title, false)
 	case promptDiscardMenu:
 		return m.renderDiscardMenuModal()
 	case promptConfirmDiscardAll:
-		return m.renderModal("Discard All Changes", "Discard ALL changes in the working tree?", "y - confirm   n / esc - cancel")
+		return m.renderModal("Discard all changes", "Discard ALL changes in the working tree?")
 	case promptConfirmBranchReset:
-		return m.renderModal("Reset Branch", m.pendingResetLabel+"?", "y - confirm   n / esc - cancel")
+		return m.renderModal("Reset branch", m.pendingResetLabel+"?")
 	case promptConfirmBranchMerge:
-		return m.renderModal("Merge Branch", m.pendingMergeLabel+"?", "y - confirm   n / esc - cancel")
+		return m.renderModal("Merge branch", m.pendingMergeLabel+"?")
 	case promptConfirmRevert:
-		return m.renderModal("Drop Revision", m.pendingResetLabel+"?", "y - confirm   n / esc - cancel")
+		return m.renderModal("Drop revision", m.pendingResetLabel+"?")
 	case promptConfirmForceUnlock:
 		owner := m.locks[m.pendingForceUnlockPath].Owner
-		return m.renderModal("Force Unlock", "Force-unlock "+owner+"'s lock on "+m.pendingForceUnlockPath+"?", "y - confirm   n / esc - cancel")
+		return m.renderModal("Force unlock", "Force-unlock "+owner+"'s lock on "+m.pendingForceUnlockPath+"?")
 	default:
 		return ""
 	}
@@ -87,16 +75,19 @@ func (m Model) renderPromptModal() string {
 // panel - see titles.go) instead of a bold inline title line, matching
 // lazygit's own "Commit summary" box.
 func (m Model) renderCommitModal() string {
-	width := m.input.Width
-	if m.width > 0 {
-		width = max(1, min(width, m.width-borderWidth))
-	}
+	return m.renderInputModal("Commit summary", true)
+}
+
+func (m Model) renderInputModal(title string, count bool) string {
+	width := m.popupWidth(80)
 	// Textinput renders a cursor cell in addition to its configured width.
-	m.input.Width = max(1, width-1)
+	m.input.Width = max(1, width-lipgloss.Width(m.input.Prompt)-1)
 	m.input.SetCursor(m.input.Position())
 	box := focusedPanelStyle.Width(width).Height(1).Render(m.input.View())
-	box = injectTitle(box, "", "Commit summary", 0, true)
-	box = withTopRightCount(box, fmt.Sprintf("%d", len([]rune(m.input.Value()))), true)
+	box = injectTitle(box, "", title, 0, true)
+	if count {
+		box = withTopRightCount(box, fmt.Sprintf("%d", len([]rune(m.input.Value()))), true)
+	}
 	return box
 }
 
@@ -106,16 +97,67 @@ func (m Model) renderCommitModal() string {
 // file as a whole, so a single file is never "mixed" and the option stays
 // struck through for it.
 func (m Model) renderDiscardMenuModal() string {
-	dim := lipgloss.NewStyle().Strikethrough(true)
-
-	body := "Discard all changes in " + m.pendingDiscardPath
-	unstagedLine := "u - Discard unstaged changes"
-	if !m.pendingDiscardIsDir || !m.pendingDiscardDirMixed {
-		unstagedLine = dim.Render(unstagedLine)
+	width := m.popupWidth(90)
+	disabled := !m.pendingDiscardIsDir || !m.pendingDiscardDirMixed
+	labels := [3]string{"Discard all changes", "Discard unstaged changes", "Cancel"}
+	keys := [3]string{"x", "u", " "}
+	rows := make([]string, len(labels))
+	for i, label := range labels {
+		style := lipgloss.NewStyle().Width(width)
+		if i == m.discardCursor {
+			style = cursorRowStyle(true, width)
+		}
+		textStyle := style.UnsetWidth()
+		separator := textStyle.Render(" ")
+		keyStyle := textStyle.Foreground(lipgloss.Color("6"))
+		if i == 1 && disabled {
+			textStyle = textStyle.Strikethrough(true)
+		}
+		row := keyStyle.Render(keys[i]) + separator + textStyle.Render(label)
+		rows[i] = renderStyledRow(style, ansi.Truncate(row, width, "…"))
 	}
+	menu := renderTitledPanel(true, width, 3, "", "Discard changes", strings.Join(rows, "\n"))
+	menu = withBottomCount(menu, fmt.Sprintf("%d of 3", m.discardCursor+1), true)
 
-	hint := "x - Discard all changes\n" + unstagedLine + "\nesc - cancel"
-	return m.renderModal("Discard Changes", body, hint)
+	description := ""
+	path := singleLineDisplay(m.pendingDiscardPath)
+	switch m.discardCursor {
+	case 0:
+		description = "Discard both staged and unstaged changes in '" + path + "'."
+	case 1:
+		description = "Discard unstaged changes in '" + path + "'."
+	}
+	// Leave the menu and footer visible even for paths spanning many lines.
+	bodyHeight := 20
+	if m.height > 0 {
+		bodyHeight = max(1, m.height-8)
+	}
+	var reason []string
+	if m.discardCursor == 1 && disabled {
+		text := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render("Disabled: ") +
+			"The selected items don't have both staged and unstaged changes."
+		reason = strings.Split(ansi.Wrap(text, width, ""), "\n")
+		if len(reason) > bodyHeight-1 {
+			reason = reason[:max(0, bodyHeight-1)]
+		}
+	}
+	lines := strings.Split(ansi.Wrap(description, width, ""), "\n")
+	limit := max(1, bodyHeight-len(reason))
+	if len(reason) > 0 && limit > 1 {
+		limit--
+	}
+	if len(lines) > limit {
+		lines = lines[:limit]
+		lines[limit-1] = ansi.Truncate(lines[limit-1], width-1, "") + "…"
+	}
+	if len(reason) > 0 {
+		if len(lines)+len(reason) < bodyHeight {
+			lines = append(lines, "")
+		}
+		lines = append(lines, reason...)
+	}
+	tooltip := unfocusedPanelStyle.Width(width).Render(strings.Join(lines, "\n"))
+	return lipgloss.JoinVertical(lipgloss.Left, menu, tooltip)
 }
 
 // helpRow is one line of the keybindings overlay: either a section header
@@ -125,6 +167,7 @@ func (m Model) renderDiscardMenuModal() string {
 // panels) assumes that 1:1 mapping between row index and screen line.
 type helpRow struct {
 	key, desc string
+	binding   string
 	section   bool
 	blank     bool
 }
@@ -136,27 +179,27 @@ func (m Model) localHelpRows() []helpRow {
 	switch m.focus {
 	case focusFiles:
 		return []helpRow{
-			{key: "space", desc: "Stage / unstage selected file, or a whole folder recursively"},
-			{key: "a", desc: "Stage / unstage everything"},
-			{key: "enter", desc: "Expand/collapse folder, or show the selected file's diff"},
-			{key: "c", desc: "Commit staged changes"},
-			{key: "e", desc: "Edit file in $VISUAL/$EDITOR"},
-			{key: "d", desc: "Discard changes to selected file/folder"},
-			{key: "D", desc: "Discard ALL changes"},
-			{key: "L", desc: "Toggle file lock"},
+			{key: "space", binding: " ", desc: "Stage / unstage selected file, or a whole folder recursively"},
+			{key: "a", binding: "a", desc: "Stage / unstage everything"},
+			{key: "enter", binding: "enter", desc: "Expand/collapse folder, or show the selected file's diff"},
+			{key: "c", binding: "c", desc: "Commit staged changes"},
+			{key: "e", binding: "e", desc: "Edit file in $VISUAL/$EDITOR"},
+			{key: "d", binding: "d", desc: "Discard changes to selected file/folder"},
+			{key: "D", binding: "D", desc: "Discard ALL changes"},
+			{key: "L", binding: "L", desc: "Toggle file lock"},
 		}
 	case focusBranches:
 		return []helpRow{
-			{key: "space", desc: "Checkout selected branch"},
-			{key: "n", desc: "Create new branch"},
-			{key: "M", desc: "Merge selected branch into the current one"},
-			{key: "g", desc: "Reset current branch to selected branch"},
+			{key: "space", binding: " ", desc: "Checkout selected branch"},
+			{key: "n", binding: "n", desc: "Create new branch"},
+			{key: "M", binding: "M", desc: "Merge selected branch into the current one"},
+			{key: "g", binding: "g", desc: "Reset current branch to selected branch"},
 		}
 	case focusHistory:
 		return []helpRow{
-			{key: "space", desc: "Checkout selected revision"},
-			{key: "d", desc: "Drop (revert) selected revision"},
-			{key: "g", desc: "Reset current branch to selected revision"},
+			{key: "space", binding: " ", desc: "Checkout selected revision"},
+			{key: "d", binding: "d", desc: "Drop (revert) selected revision"},
+			{key: "g", binding: "g", desc: "Reset current branch to selected revision"},
 		}
 	default:
 		return nil
@@ -167,18 +210,28 @@ func (m Model) localHelpRows() []helpRow {
 // focused (see handleKey in keys.go).
 func globalHelpRows() []helpRow {
 	return []helpRow{
-		{key: "tab / l", desc: "Next panel"},
-		{key: "shift+tab / h", desc: "Previous panel"},
-		{key: "1-6", desc: "Jump to panel"},
-		{key: "[ / ]", desc: "Cycle panel sub-tabs (Branches: Local/Remotes)"},
-		{key: "p", desc: "Pull (sync to latest remote)"},
-		{key: "P", desc: "Push current branch"},
-		{key: "/", desc: "Filter list"},
-		{key: "v", desc: "Select mode (release mouse to copy text)"},
-		{key: "q", desc: "Quit"},
-		{key: "j/k / ↑/↓", desc: "Move selection in this help (or mouse wheel)"},
-		{key: "?, esc", desc: "Close this help"},
+		{key: "p", binding: "p", desc: "Pull (sync to latest remote)"},
+		{key: "P", binding: "P", desc: "Push current branch"},
+		{key: "/", binding: "/", desc: "Filter list"},
+		{key: "v", binding: "v", desc: "Select mode (release mouse to copy text)"},
+		{key: "q", binding: "q", desc: "Quit"},
+		{key: "?, esc", binding: "esc", desc: "Close this help"},
 	}
+}
+
+func navigationHelpRows() []helpRow {
+	rows := []helpRow{
+		{key: "tab / l", binding: "tab", desc: "Next panel"},
+		{key: "shift+tab / h", binding: "shift+tab", desc: "Previous panel"},
+		{key: "[ / ]", binding: "]", desc: "Cycle panel sub-tabs (Branches: Local/Remotes)"},
+		{key: "↑ / k", binding: "up", desc: "Previous item"},
+		{key: "↓ / j", binding: "down", desc: "Next item"},
+	}
+	for i, name := range []string{"Status", "Files", "Branches", "History", "Diff", "Command log"} {
+		key := fmt.Sprintf("%d", i+1)
+		rows = append(rows, helpRow{key: key, binding: key, desc: "Go to " + name + " panel"})
+	}
+	return rows
 }
 
 // buildHelpRows combines the focused panel's own bindings ("Local") with
@@ -196,6 +249,8 @@ func (m Model) buildHelpRows() []helpRow {
 	}
 	rows = append(rows, helpRow{key: "Global", section: true})
 	rows = append(rows, globalHelpRows()...)
+	rows = append(rows, helpRow{blank: true}, helpRow{key: "Navigation", section: true})
+	rows = append(rows, navigationHelpRows()...)
 	return rows
 }
 
@@ -249,12 +304,11 @@ func selectableRank(rows []helpRow, cursor int) (rank, total int) {
 // matching lazygit's own keybindings popup.
 func (m Model) renderHelpModal() string {
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	dimStyle := lipgloss.NewStyle()
 	hdrStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
 
 	// Right-align keys against a shared column so ragged key lengths (e.g.
 	// "y" vs "shift+tab / h") all end at the same point, with the section
-	// header's "── Local ──" starting where descriptions do - lazygit's own
+	// header's "─── Local" starting where descriptions do - lazygit's own
 	// layout for this popup.
 	keyColWidth := 0
 	for _, r := range m.helpRows {
@@ -273,14 +327,17 @@ func (m Model) renderHelpModal() string {
 		case r.blank:
 			// Nothing to write - just the newline below.
 		case r.section:
-			line := strings.Repeat(" ", keyColWidth+2) + fmt.Sprintf("── %s ──", r.key)
+			line := strings.Repeat(" ", keyColWidth+2) + fmt.Sprintf("─── %s", r.key)
 			b.WriteString(hdrStyle.Render(line))
-		case i == m.helpCursor:
-			line := fmt.Sprintf("%*s  %s", keyColWidth, r.key, r.desc)
-			b.WriteString(selectedRowStyle(m.helpWidth).Render(lipgloss.NewStyle().MaxWidth(m.helpWidth).Render(line)))
 		default:
-			line := fmt.Sprintf("%s  %s", keyStyle.Render(fmt.Sprintf("%*s", keyColWidth, r.key)), dimStyle.Render(r.desc))
-			b.WriteString(lipgloss.NewStyle().MaxWidth(m.helpWidth).Render(line))
+			rowStyle := lipgloss.NewStyle().Width(m.helpWidth)
+			if i == m.helpCursor {
+				rowStyle = selectedRowStyle(m.helpWidth)
+			}
+			segment := rowStyle.UnsetWidth()
+			key := segment.Foreground(keyStyle.GetForeground()).Render(fmt.Sprintf("%*s", keyColWidth, r.key))
+			line := key + segment.Render("  "+r.desc)
+			b.WriteString(renderStyledRow(rowStyle, ansi.Truncate(line, m.helpWidth, "…")))
 		}
 		if i != end-1 {
 			b.WriteByte('\n')

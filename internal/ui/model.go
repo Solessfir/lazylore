@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 
@@ -59,6 +58,7 @@ type Model struct {
 	focus                  focusPanel
 	prompt                 promptKind
 	input                  textinput.Model
+	discardCursor          int
 	pendingDiscardPath     string
 	pendingDiscardPaths    []string
 	pendingDiscardUnstaged []string
@@ -462,30 +462,12 @@ func (m *Model) toggleDirCollapse(path string) tea.Cmd {
 }
 
 // openHelp builds the "?" keybindings popup's row list for the currently
-// focused panel. The popup's height is a fixed fraction of the terminal
-// (like every other panel), not sized to the row count, scrolling instead
-// of growing when there are more rows than fit.
+// focused panel, with the same bounded width and height as other popups.
 func (m *Model) openHelp() {
 	m.showHelp = true
 	m.helpRows = m.buildHelpRows()
-	keyColWidth := 0
-	for _, r := range m.helpRows {
-		if !r.section {
-			keyColWidth = max(keyColWidth, lipgloss.Width(r.key))
-		}
-	}
-	longest := 0
-	for _, r := range m.helpRows {
-		line := strings.Repeat(" ", keyColWidth+2) + fmt.Sprintf("── %s ──", r.key)
-		if !r.section {
-			line = fmt.Sprintf("%*s  %s", keyColWidth, r.key, r.desc)
-		}
-		if w := lipgloss.Width(line); w > longest {
-			longest = w
-		}
-	}
-	m.helpWidth = min(longest, max(20, m.width-8))
-	m.helpHeight = max(3, (m.height-6)/2)
+	m.helpWidth = m.popupWidth(90)
+	m.helpHeight = min(len(m.helpRows), max(3, 3*m.height/4-borderHeight))
 	m.helpCursor = firstSelectable(m.helpRows)
 }
 
@@ -834,6 +816,13 @@ const (
 // command log panel placed directly below the Diff on the right side only.
 const commandLogPanelHeight = 10
 
+func (m Model) commandLogHeight() int {
+	if m.height < 40 {
+		return 1 + borderHeight
+	}
+	return commandLogPanelHeight
+}
+
 // resize propagates the terminal size to every sub-widget: a Status panel
 // plus stacked lists on the left (Files/Branches/History), the diff
 // viewport + command log panel below it on the right, plus the prompt/error
@@ -853,9 +842,8 @@ func (m *Model) resize() {
 	m.panelWidth = max(0, leftWidth-borderWidth)
 	m.recomputePanelHeights()
 
-	// Leave 1 column inside the panel for the scrollbar (drawn after content, before right border)
 	diffInnerW := max(0, rightWidth-borderWidth)
-	m.diff.vp.Width = max(0, diffInnerW-1)
+	m.diff.vp.Width = diffInnerW
 	m.syncPanelSizes()
 
 	// Branches/History's selected-row width is baked into their delegate
@@ -864,11 +852,9 @@ func (m *Model) resize() {
 	m.syncFocusDelegates()
 
 	if m.showHelp {
-		// Re-fit the keybindings popup to the new terminal size. Content is
-		// deterministic from m.focus (unaffected by resize), so a full
-		// rebuild is simplest - it does lose scroll position, an acceptable
-		// cost for the rare case of resizing mid-popup.
+		cursor := m.helpCursor
 		m.openHelp()
+		m.helpCursor = cursor
 	}
 }
 
@@ -890,8 +876,8 @@ func (m *Model) recomputePanelHeights() {
 	m.branchesHeight = max(0, heights[2]-borderHeight)
 	m.historyHeight = max(0, heights[3]-borderHeight)
 
-	// Diff leaves room under itself for the command log (fixed, right only).
-	cmdLogOuter := commandLogPanelHeight
+	// Compact terminals leave one command log row so the main panel has room.
+	cmdLogOuter := m.commandLogHeight()
 	diffOuter := max(0, bodyHeight-cmdLogOuter)
 	m.diffHeight = max(0, diffOuter-borderHeight)
 }
@@ -1246,6 +1232,12 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 				m.helpCursor = nextSelectable(m.helpRows, m.helpCursor)
 			case "k", "up":
 				m.helpCursor = prevSelectable(m.helpRows, m.helpCursor)
+			case "enter":
+				binding := m.helpRows[m.helpCursor].binding
+				if binding != "" {
+					m.showHelp = false
+					return m.handleKey(helpKeyMsg(binding))
+				}
 			}
 			// Any other key is a harmless no-op instead of closing the popup.
 			return m, nil

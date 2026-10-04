@@ -105,3 +105,58 @@ func sameSelectionColor(got, want color.Color) bool {
 	wr, wg, wb, wa := want.RGBA()
 	return gr == wr && gg == wg && gb == wb && ga == wa
 }
+
+func TestDiscardMenuSelectionPreservesCyanKeyAndDisabledLabel(t *testing.T) {
+	previous := lipgloss.DefaultRenderer()
+	renderer := lipgloss.NewRenderer(io.Discard)
+	renderer.SetColorProfile(termenv.TrueColor)
+	lipgloss.SetDefaultRenderer(renderer)
+	t.Cleanup(func() { lipgloss.SetDefaultRenderer(previous) })
+	m := NewModel(&lore.FakeRunner{}, "repo", "/repo")
+	m.width, m.height = 120, 40
+	m.discardCursor = 1
+	got := m.renderDiscardMenuModal()
+	cells := cellbuf.NewBuffer(lipgloss.Width(got), lipgloss.Height(got))
+	cellbuf.SetContent(cells, got)
+	key := cells.Cell(1, 2)
+	label := cells.Cell(3, 2)
+	padding := cells.Cell(cells.Width()-2, 2)
+	for _, cell := range []*cellbuf.Cell{key, cells.Cell(2, 2), label, padding} {
+		if cell.Style.Attrs&cellbuf.BoldAttr == 0 || cell.Style.Bg == nil {
+			t.Fatal("selected menu row lost bold or background across styled segments")
+		}
+	}
+	if !sameSelectionColor(key.Style.Fg, ansi.BasicColor(6)) || key.Style.Attrs&cellbuf.StrikethroughAttr != 0 ||
+		label.Style.Fg != nil || label.Style.Attrs&cellbuf.StrikethroughAttr == 0 {
+		t.Fatal("disabled menu option lost its semantic key color or struck through the shortcut")
+	}
+	if cells.Cell(3, 1).Style.Bg != nil || cells.Cell(3, 3).Style.Bg != nil {
+		t.Fatal("selection background leaked into unselected menu options")
+	}
+}
+
+func TestHelpSelectionPreservesKeyColorAcrossItsWholeRow(t *testing.T) {
+	previous := lipgloss.DefaultRenderer()
+	renderer := lipgloss.NewRenderer(io.Discard)
+	renderer.SetColorProfile(termenv.TrueColor)
+	lipgloss.SetDefaultRenderer(renderer)
+	t.Cleanup(func() { lipgloss.SetDefaultRenderer(previous) })
+	m := NewModel(&lore.FakeRunner{}, "repo", "/repo")
+	m.width, m.height = 120, 40
+	m.openHelp()
+	got := m.renderHelpModal()
+	cells := cellbuf.NewBuffer(lipgloss.Width(got), lipgloss.Height(got))
+	cellbuf.SetContent(cells, got)
+	y := m.helpCursor + 1
+	for x := 1; x < cells.Width()-1; x++ {
+		cell := cells.Cell(x, y)
+		if cell.Style.Attrs&cellbuf.BoldAttr == 0 || cell.Style.Bg == nil {
+			t.Fatalf("help selection lost emphasis at column %d", x)
+		}
+	}
+	plain := strings.Split(ansi.Strip(got), "\n")[y]
+	keyX := ansi.StringWidth(plain[:strings.Index(plain, "space")])
+	if !sameSelectionColor(cells.Cell(keyX, y).Style.Fg, ansi.BasicColor(6)) || cells.Cell(keyX+7, y).Style.Fg != nil {
+		t.Fatal("selected help row lost its cyan key or colored its description")
+	}
+}

@@ -24,7 +24,7 @@ func TestModel_ResizeLeavesAtLeastOneColumnOfMargin(t *testing.T) {
 	m2 := updated.(Model)
 
 	leftOuter := m2.panelWidth + borderWidth
-	rightOuter := m2.diff.vp.Width + 1 + borderWidth // +1 for the scrollbar column
+	rightOuter := m2.diff.vp.Width + borderWidth
 	if total := leftOuter + rightOuter; total >= 141 {
 		t.Fatalf("left+right outer width = %d, want strictly less than terminal width 141 (some margin)", total)
 	}

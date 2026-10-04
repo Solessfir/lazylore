@@ -40,6 +40,18 @@ const (
 	promptConfirmBranchMerge
 )
 
+func helpKeyMsg(binding string) tea.KeyMsg {
+	types := map[string]tea.KeyType{
+		" ": tea.KeySpace, "enter": tea.KeyEnter, "esc": tea.KeyEsc,
+		"tab": tea.KeyTab, "shift+tab": tea.KeyShiftTab,
+		"up": tea.KeyUp, "down": tea.KeyDown,
+	}
+	if kind, ok := types[binding]; ok {
+		return tea.KeyMsg{Type: kind}
+	}
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(binding)}
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.focusedListIsFiltering() {
 		return m.updateFocusedList(msg)
@@ -145,6 +157,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		m.prompt = promptNewBranch
 		m.input = textinput.New()
+		m.input.Prompt = ""
 		m.input.Placeholder = "branch name"
 		m.input.Width = 40
 		m.input.Focus()
@@ -201,6 +214,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					lorePath = "." // synthetic "/" root row - see toggleDirStage
 				}
 				m.prompt = promptDiscardMenu
+				m.discardCursor = 0
 				m.pendingDiscardPath = lorePath
 				m.pendingDiscardIsDir = item.isDir
 				m.pendingDiscardDirMixed = false
@@ -388,7 +402,18 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.prompt == promptDiscardMenu {
 		isDir := m.pendingDiscardIsDir
 		mixed := m.pendingDiscardDirMixed
-		switch msg.String() {
+		key := msg.String()
+		switch key {
+		case "down", "j":
+			m.discardCursor = min(2, m.discardCursor+1)
+			return m, nil
+		case "up", "k":
+			m.discardCursor = max(0, m.discardCursor-1)
+			return m, nil
+		case "enter", " ":
+			key = [3]string{"x", "u", "esc"}[m.discardCursor]
+		}
+		switch key {
 		case "x":
 			paths := m.pendingDiscardPaths
 			m.prompt = promptNone
@@ -438,9 +463,18 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	confirmed := msg.String() == "enter" || msg.String() == "y"
+	if m.prompt != promptCommit && m.prompt != promptNewBranch {
+		switch msg.String() {
+		case "enter", "y", "esc", "n":
+		default:
+			return m, nil
+		}
+	}
+
 	if m.prompt == promptConfirmStageAllForCommit {
 		m.prompt = promptNone
-		if msg.String() == "y" {
+		if confirmed {
 			m.pendingCommitAfterStageAll = true
 			return m, m.toggleDirStage("")
 		}
@@ -453,7 +487,7 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		label := m.pendingMergeLabel
 		m.pendingMergeBranch = ""
 		m.pendingMergeLabel = ""
-		if msg.String() == "y" {
+		if confirmed {
 			return m, m.activityCmd("Merging", mergeBranchCmd(m.runner, branch, label))
 		}
 		return m, nil
@@ -463,7 +497,7 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prompt = promptNone
 		paths := m.pendingDiscardPaths
 		m.pendingDiscardPaths = nil
-		if msg.String() == "y" && len(paths) > 0 {
+		if confirmed && len(paths) > 0 {
 			return m, m.activityCmd("Discarding all changes", discardAllCmd(m.runner, m.repoRoot, paths))
 		}
 		return m, nil
@@ -475,7 +509,7 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		label := m.pendingResetLabel
 		m.pendingResetRevision = ""
 		m.pendingResetLabel = ""
-		if msg.String() == "y" {
+		if confirmed {
 			return m, m.activityCmd("Resetting", resetBranchCmd(m.runner, revision, label))
 		}
 		return m, nil
@@ -489,7 +523,7 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingResetRevision = ""
 		m.pendingResetLabel = ""
 		m.pendingRevertMessage = ""
-		if msg.String() == "y" {
+		if confirmed {
 			return m, m.activityCmd("Reverting", revertCmd(m.runner, revision, message, label))
 		}
 		return m, nil
@@ -499,7 +533,7 @@ func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prompt = promptNone
 		path := m.pendingForceUnlockPath
 		m.pendingForceUnlockPath = ""
-		if msg.String() == "y" {
+		if confirmed {
 			opKey := "lock:" + path
 			if m.pendingFileOps[opKey] {
 				return m, nil

@@ -164,7 +164,7 @@ func (m Model) layoutFits() bool {
 	available := m.height - bottom
 	if m.panelWidth < 1 || m.diff.vp.Width < 1 ||
 		l.effFilesH < 1 || l.effBranchesH < 1 || l.effHistoryH < 1 || l.effDiffH < 1 ||
-		l.mainH > available || l.diffH+commandLogPanelHeight > available {
+		l.mainH > available || l.diffH+m.commandLogHeight() > available {
 		return false
 	}
 	modal := ""
@@ -261,7 +261,7 @@ func (m Model) View() string {
 	effDiffH := m.diffHeight + extra // all footer-saved growth to diff (log fixed size)
 
 	// Re-size widgets for the effective (larger when prompt footer short) content area.
-	// Command log height is fixed (see commandLogPanelHeight).
+	// Command log height adapts to the terminal height.
 	m.syncPanelSizes()
 
 	// Use titled-border rendering so "Status"/"Files" etc. appear in the top
@@ -304,6 +304,11 @@ func (m Model) View() string {
 				v = renderListWindow(m.branches, compactTitleDelegate{focused: m.paneFocused(focusBranches), width: m.panelWidth}, effBranchesH, m.branchesScrollOverride)
 			}
 			p := renderDualTitledPanel(m.paneFocused(focusBranches), m.panelWidth, effBranchesH, "3", "Local branches", "Remotes", !m.showRemoteBranches, v)
+			if !m.branches.SettingFilter() {
+				total := len(m.branches.VisibleItems())
+				start := effectiveScrollStart(m.branchesScrollOverride, m.branches.Index(), total, effBranchesH)
+				p = withScrollbar(p, start, total, effBranchesH, m.paneFocused(focusBranches))
+			}
 			if len(m.branches.Items()) > 0 {
 				p = withBottomCount(p, listPositionCount(m.branches), m.paneFocused(focusBranches))
 			}
@@ -319,6 +324,11 @@ func (m Model) View() string {
 				v = renderListWindow(m.history, compactTitleDelegate{focused: m.paneFocused(focusHistory), width: m.panelWidth}, effHistoryH, m.historyScrollOverride)
 			}
 			p := renderTitledPanel(m.paneFocused(focusHistory), m.panelWidth, effHistoryH, "4", "History", v)
+			if !m.history.SettingFilter() {
+				total := len(m.history.VisibleItems())
+				start := effectiveScrollStart(m.historyScrollOverride, m.history.Index(), total, effHistoryH)
+				p = withScrollbar(p, start, total, effHistoryH, m.paneFocused(focusHistory))
+			}
 			if len(m.history.Items()) > 0 {
 				p = withBottomCount(p, listPositionCount(m.history), m.paneFocused(focusHistory))
 			}
@@ -331,12 +341,12 @@ func (m Model) View() string {
 	// Focusing Command Log expands it to take over Diff's space entirely,
 	// matching lazygit's own extras-panel behavior - hiding rather than
 	// merely resizing Diff, since there's nothing useful to show it shrunk.
-	diffW := m.diff.vp.Width + 1
+	diffW := m.diff.vp.Width
 	logCommandLogFocused := m.focus == focusCommandLog
 
-	logOuterH := commandLogPanelHeight
+	logOuterH := m.commandLogHeight()
 	if logCommandLogFocused {
-		logOuterH = effDiffH + borderHeight + commandLogPanelHeight
+		logOuterH = effDiffH + borderHeight + m.commandLogHeight()
 	}
 	logInnerH := max(0, logOuterH-borderHeight)
 	logContent := m.log.LastLines(logInnerH)
@@ -355,12 +365,19 @@ func (m Model) View() string {
 	if logCommandLogFocused {
 		right = logPanel
 	} else {
-		diffPanel := renderTitledPanel(m.paneFocused(focusDiff), diffW, effDiffH, "5", m.mainPanelTitle(), m.diff.viewWithScrollbar())
+		diffPanel := renderTitledPanel(m.paneFocused(focusDiff), diffW, effDiffH, "5", m.mainPanelTitle(), m.diff.vp.View())
+		diffPanel = withScrollbar(diffPanel, m.diff.vp.YOffset, m.diff.totalLines, effDiffH, m.paneFocused(focusDiff))
 		right = lipgloss.JoinVertical(lipgloss.Left, diffPanel, logPanel)
 	}
 	main := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	keybind := keybindBarStyle.Render(m.footerText(m.width-1, keybindBarFor(m.focus)))
+	shortcuts := keybindBarFor(m.focus)
+	if m.showHelp || m.prompt == promptDiscardMenu {
+		shortcuts = "Execute: <enter> | Close/Cancel: <esc>"
+	} else if m.prompt != promptNone {
+		shortcuts = "Confirm: <enter> | Close/Cancel: <esc>"
+	}
+	keybind := keybindBarStyle.Render(m.footerText(m.width-1, shortcuts))
 
 	bottom := keybind
 	if footer != "" {

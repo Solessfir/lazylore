@@ -273,7 +273,7 @@ func TestModel_MouseDoesNotSelectOrPanListsWhileEditingFilter(t *testing.T) {
 
 func TestModel_MouseCannotInteractWithHiddenSmallTerminalPanels(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 15})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 12})
 	m = updated.(Model)
 	var changes []lore.FileChange
 	for i := 0; i < 30; i++ {
@@ -1485,6 +1485,8 @@ func TestModel_FolderDiscardKeepsPromptSnapshotAfterRefresh(t *testing.T) {
 		{"folder all", "src", "x", []string{"src/staged.go", "src/known.go"}, false},
 		{"folder unstaged", "src", "u", []string{"src/known.go"}, false},
 		{"root all", "", "x", []string{"src/staged.go", "src/known.go", "other/known.go"}, false},
+		{"root all via Enter", "", "enter", []string{"src/staged.go", "src/known.go", "other/known.go"}, false},
+		{"folder unstaged via Space", "src", " ", []string{"src/known.go"}, false},
 		{"root unstaged", "", "u", []string{"src/known.go", "other/known.go"}, false},
 		{"unstaged file staged after prompt", "src", "u", nil, true},
 	} {
@@ -1528,7 +1530,15 @@ func TestModel_FolderDiscardKeepsPromptSnapshotAfterRefresh(t *testing.T) {
 			}
 			updated, _ = m.Update(statusMsg{status: status})
 			m = updated.(Model)
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tc.key)})
+			key := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tc.key)}
+			if tc.key == "enter" {
+				key = tea.KeyMsg{Type: tea.KeyEnter}
+			} else if tc.key == " " {
+				updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+				m = updated.(Model)
+				key = tea.KeyMsg{Type: tea.KeySpace}
+			}
+			updated, cmd := m.Update(key)
 			m = updated.(Model)
 			runBatch(cmd)
 			if len(tc.want) == 0 && len(fake.Calls) != 0 {
@@ -1536,7 +1546,7 @@ func TestModel_FolderDiscardKeepsPromptSnapshotAfterRefresh(t *testing.T) {
 			}
 			if len(tc.want) > 0 {
 				expected := []string{"--json reset --purge -- " + strings.Join(tc.want, " ")}
-				if tc.key == "x" {
+				if tc.key == "x" || tc.key == "enter" {
 					expected = append([]string{"--json unstage -- " + strings.Join(tc.want, " ")}, expected...)
 				}
 				var calls []string
@@ -1551,6 +1561,105 @@ func TestModel_FolderDiscardKeepsPromptSnapshotAfterRefresh(t *testing.T) {
 				t.Fatal("confirmed menu retained its snapshot")
 			}
 		})
+	}
+}
+
+func TestDiscardMenuNavigationDisabledOptionAndCancel(t *testing.T) {
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = updated.(Model)
+	updated, _ = m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "file.txt"}}}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = updated.(Model)
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyUp}, {Type: tea.KeyDown}, {Type: tea.KeyEnter}, {Type: tea.KeySpace}} {
+		updated, cmd := m.Update(key)
+		m = updated.(Model)
+		if cmd != nil || m.prompt != promptDiscardMenu || len(fake.Calls) != 0 {
+			t.Fatalf("key %q executed work or closed the menu: prompt=%v cursor=%d cmd=%v calls=%v", key.String(), m.prompt, m.discardCursor, cmd != nil, fake.Calls)
+		}
+	}
+	if m.discardCursor != 1 {
+		t.Fatal("disabled option was not selectable")
+	}
+	for _, size := range []tea.WindowSizeMsg{{Width: 20, Height: 5}, {Width: 120, Height: 40}} {
+		updated, _ = m.Update(size)
+		m = updated.(Model)
+		if m.discardCursor != 1 || m.pendingDiscardPath != "file.txt" {
+			t.Fatal("resize lost the menu selection or discard target")
+		}
+	}
+	for _, key := range []string{"j", "j", "k", "j"} {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		m = updated.(Model)
+	}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd != nil || m.prompt != promptNone || len(fake.Calls) != 0 || len(m.pendingDiscardPaths) != 0 {
+		t.Fatal("Cancel executed work or retained the discard snapshot")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if updated.(Model).discardCursor != 0 {
+		t.Fatal("reopening did not select the first option")
+	}
+}
+
+func TestConfirmationKeysOnlyConfirmOrCancelExplicitly(t *testing.T) {
+	for _, prompt := range []promptKind{
+		promptConfirmStageAllForCommit, promptConfirmDiscardAll, promptConfirmBranchReset,
+		promptConfirmBranchMerge, promptConfirmRevert, promptConfirmForceUnlock,
+	} {
+		for _, key := range []tea.KeyMsg{{Type: tea.KeyEnter}, {Type: tea.KeyEsc}, {Type: tea.KeyRunes, Runes: []rune("n")}} {
+			m := NewModel(&lore.FakeRunner{}, "repo", "/repo")
+			updated, _ := m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "known.txt"}}}})
+			m = updated.(Model)
+			m.prompt = prompt
+			m.pendingDiscardPaths = []string{"known.txt"}
+			m.pendingResetRevision = "revision"
+			m.pendingMergeBranch = "branch"
+			m.pendingRevertMessage = "Revert revision"
+			m.pendingForceUnlockPath = "known.txt"
+			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+			m = updated.(Model)
+			if cmd != nil || m.prompt != prompt || len(m.pendingDiscardPaths) != 1 || m.pendingResetRevision != "revision" {
+				t.Fatalf("unrelated key changed confirmation %v or its pending targets", prompt)
+			}
+			updated, cmd = m.Update(key)
+			m = updated.(Model)
+			if m.prompt != promptNone || (cmd != nil) != (key.Type == tea.KeyEnter) {
+				t.Fatalf("confirmation %v handling %q: prompt=%v cmd=%v", prompt, key.String(), m.prompt, cmd != nil)
+			}
+		}
+	}
+}
+
+func TestHelpExecutionRetainsConfirmationAndSelectionAfterResize(t *testing.T) {
+	fake := &lore.FakeRunner{}
+	m := NewModel(fake, "repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = updated.(Model)
+	updated, _ = m.Update(statusMsg{status: lore.Status{Unstaged: []lore.FileChange{{Status: 'M', Path: "known.txt"}}}})
+	m = updated.(Model)
+	m.openHelp()
+	for i, row := range m.helpRows {
+		if row.binding == "D" {
+			m.helpCursor = i
+			break
+		}
+	}
+	cursor := m.helpCursor
+	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 16}, {Width: 120, Height: 40}} {
+		updated, _ = m.Update(size)
+		m = updated.(Model)
+		if m.helpCursor != cursor {
+			t.Fatal("resize reset the selected help binding")
+		}
+	}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd != nil || m.showHelp || m.prompt != promptConfirmDiscardAll || len(fake.Calls) != 0 || len(m.pendingDiscardPaths) != 1 {
+		t.Fatal("executing a destructive help binding bypassed its confirmation")
 	}
 }
 

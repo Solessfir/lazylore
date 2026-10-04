@@ -7,9 +7,40 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"lazylore/internal/lore"
 )
+
+func TestDiscardMenuDescriptionFollowsSelectionAndFitsResize(t *testing.T) {
+	m := NewModel(&lore.FakeRunner{}, "repo", "/repo")
+	m.prompt = promptDiscardMenu
+	m.pendingDiscardPath = "notes.txt"
+	m.width, m.height = 120, 40
+	for cursor, want := range []string{
+		"Discard both staged and unstaged changes in 'notes.txt'.",
+		"Disabled: The selected items don't have both staged and unstaged changes.",
+		"",
+	} {
+		m.discardCursor = cursor
+		got := ansi.Strip(m.renderDiscardMenuModal())
+		if !strings.Contains(got, want) || !strings.Contains(got, "Discard changes") || !strings.Contains(got, "Cancel") {
+			t.Fatalf("selection %d lost its menu or description: %q", cursor, got)
+		}
+		if cursor == 2 && strings.Contains(got, "notes.txt") {
+			t.Fatal("Cancel retained another option's description")
+		}
+	}
+	m.discardCursor = 1
+	m.pendingDiscardPath = strings.Repeat("界/folder/", 100)
+	for _, size := range []tea.WindowSizeMsg{{Width: 80, Height: 24}, {Width: 40, Height: 16}, {Width: 120, Height: 40}} {
+		m.width, m.height = size.Width, size.Height
+		got := m.renderDiscardMenuModal()
+		if lipgloss.Width(got) > m.width || lipgloss.Height(got) >= m.height || !strings.Contains(ansi.Strip(got), "Disabled:") {
+			t.Fatalf("discard menu lost its explanation or exceeded %dx%d: %q", m.width, m.height, got)
+		}
+	}
+}
 
 func TestCurrentFooter_EmptyWhenPromptOpen(t *testing.T) {
 	// Prompts render as a centered popup (see renderPromptModal), not the
@@ -53,7 +84,7 @@ func TestRenderPromptModal_ConfirmShowsPendingLabel(t *testing.T) {
 	}
 }
 
-func TestConfirmationFitsTerminalAndRetainsHints(t *testing.T) {
+func TestConfirmationFitsTerminalWithContextualFooter(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = updated.(Model)
@@ -64,8 +95,25 @@ func TestConfirmationFitsTerminalAndRetainsHints(t *testing.T) {
 	if lipgloss.Width(got) > m.width || lipgloss.Height(got) > m.height {
 		t.Fatalf("confirmation rendered %dx%d for %dx%d", lipgloss.Width(got), lipgloss.Height(got), m.width, m.height)
 	}
-	if !strings.Contains(got, "Force-unlock") || !strings.Contains(got, "y - confirm") || !strings.Contains(got, "n / esc - cancel") {
-		t.Fatalf("confirmation lost context or hints: %q", got)
+	if !strings.Contains(got, "Force-unlock") || !strings.Contains(m.View(), "Confirm: <enter> | Close/Cancel: <esc>") {
+		t.Fatalf("confirmation lost context or footer: %q", got)
+	}
+}
+
+func TestInputPopupsUseBoundedTitledFrames(t *testing.T) {
+	for _, prompt := range []promptKind{promptCommit, promptNewBranch} {
+		m := NewModel(&lore.FakeRunner{}, "repo", "/repo")
+		m.openCommitPrompt()
+		m.prompt = prompt
+		m.input.SetValue(strings.Repeat("branch-or-summary ", 15) + "TAIL")
+		m.input.CursorEnd()
+		for _, width := range []int{120, 40, 180} {
+			m.width, m.height = width, 40
+			got := m.renderPromptModal()
+			if lipgloss.Width(got) != min(80, width-2) || lipgloss.Height(got) != 3 || !strings.Contains(got, "TAIL") {
+				t.Fatalf("prompt %v at width %d lost its input or bounded frame: %q", prompt, width, got)
+			}
+		}
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 // without corrupting the background's own color codes.
 
 // placeOverlay renders fg on top of bg at position (x, y).
-// Left of fg preserves bg ANSI; right of fg loses ANSI styling (acceptable for overlays).
+// Preserve background styling on both sides of the popup.
 func placeOverlay(x, y int, fg, bg string) string {
 	fgLines := strings.Split(fg, "\n")
 	bgLines := strings.Split(bg, "\n")
@@ -62,7 +62,7 @@ func spliceLine(x int, fg, bg string) string {
 		left += strings.Repeat(" ", x-leftW)
 	}
 
-	// Right: bg from column x+fgW, without ANSI (reset before to avoid bleed).
+	// Right: retain background styles after resetting the popup's styles.
 	right := ansiSkip(bg, x+fgW)
 
 	return left + "\033[0m" + fg + "\033[0m" + right
@@ -73,14 +73,14 @@ func ansiTruncate(s string, maxWidth int) string {
 	return ansi.Truncate(s, max(0, maxWidth), "")
 }
 
-// ansiSkip skips the first skipCols visible columns and returns the rest (without ANSI codes).
+// ansiSkip skips visible columns while retaining the suffix's ANSI styles.
 func ansiSkip(s string, skipCols int) string {
 	plain := ansi.Strip(s)
-	right := ansi.TruncateLeft(plain, max(0, skipCols), "")
+	right := ansi.TruncateLeft(s, max(0, skipCols), "")
 	if excess := lipgloss.Width(right) - max(0, lipgloss.Width(plain)-skipCols); excess > 0 {
 		// A wide glyph crossing the cut cannot be rendered as a partial cell.
-		cluster, width := ansi.FirstGraphemeCluster(right, ansi.GraphemeWidth)
-		right = strings.Repeat(" ", width-excess) + right[len(cluster):]
+		_, width := ansi.FirstGraphemeCluster(ansi.Strip(right), ansi.GraphemeWidth)
+		right = strings.Repeat(" ", width-excess) + ansi.TruncateLeft(right, width, "")
 	}
 	return right
 }

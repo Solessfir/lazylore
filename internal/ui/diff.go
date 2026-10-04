@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"math"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -47,60 +46,6 @@ func (m *diffModel) SetContentRaw(text string) {
 	m.totalLines = len(strings.Split(text, "\n"))
 	m.vp.SetContent(text)
 	m.vp.SetXOffset(0)
-}
-
-// viewWithScrollbar returns the diff content with a simple right-side scrollbar
-// (visible when total content > visible height). The scrollbar appears just
-// inside the right border to approximate lazygit behavior.
-func (m diffModel) viewWithScrollbar() string {
-	content := m.vp.View()
-	lines := strings.Split(content, "\n")
-	h := m.vp.Height
-	if h <= 0 {
-		return content
-	}
-
-	// pad/truncate
-	for len(lines) < h {
-		lines = append(lines, "")
-	}
-	if len(lines) > h {
-		lines = lines[:h]
-	}
-
-	if m.totalLines <= h {
-		// no scrollbar needed
-		return strings.Join(lines, "\n")
-	}
-
-	// compute thumb
-	percent := 0.0
-	if m.vp.YOffset > 0 && m.totalLines > 0 {
-		percent = float64(m.vp.YOffset) / float64(max(1, m.totalLines-h))
-	}
-	// Ceiling (not floor) and a 2-row floor - a 1-row thumb on a tall panel
-	// is barely visible against the track.
-	thumbSize := max(2, int(math.Ceil(float64(h*h)/float64(m.totalLines))))
-	if thumbSize > h {
-		thumbSize = h
-	}
-	thumbStart := int(percent * float64(h-thumbSize))
-
-	innerW := m.vp.Width
-	// ANSI-aware pad/truncate (not a raw []rune slice, which would cut
-	// through colorizeDiff's escape codes and corrupt later lines).
-	cellStyle := lipgloss.NewStyle().Width(innerW).MaxWidth(innerW)
-	var result []string
-	for i, line := range lines {
-		padded := cellStyle.Render(line)
-
-		bar := "│" // track
-		if i >= thumbStart && i < thumbStart+thumbSize {
-			bar = "▐" // thumb - right-half block, visually thinner than a full "█"
-		}
-		result = append(result, padded+bar)
-	}
-	return strings.Join(result, "\n")
 }
 
 func colorizeDiff(text string) string {
