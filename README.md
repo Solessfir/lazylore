@@ -6,14 +6,6 @@ source version control system - the same relationship
 
 ![Screenshot](.github/Screenshot.png)
 
-## Status
-
-Pre-1.0. Covers the daily-driver core loop: viewing status, staging/unstaging
-files, discarding changes, committing, viewing diffs, switching/creating/
-resetting and merging branches, browsing revision history, pulling, pushing,
-and file locking. `layers` and the remaining `lore` commands are not wired up
-yet.
-
 ## Requirements
 
 - A Lore installation discoverable automatically or configured through
@@ -176,8 +168,8 @@ arm64 and uploads the archives and `checksums.txt` to a GitHub release.
 After pushing the changes to GitHub:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 Use a new semantic version for each release. GitHub's built-in `GITHUB_TOKEN`
