@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestNewListDelegate_FocusedGetsBackgroundFill(t *testing.T) {
@@ -42,6 +43,29 @@ func TestNewListDelegate_UnfocusedHasNoBackgroundFill(t *testing.T) {
 	}
 	if bg := d.Styles.SelectedTitle.GetBackground(); bg == selectedBg {
 		t.Fatalf("unfocused SelectedTitle has the focused background fill %v, want none", bg)
+	}
+	if !d.Styles.SelectedTitle.GetBold() || !d.Styles.SelectedDesc.GetBold() {
+		t.Fatal("unfocused cursor title and description should be bold")
+	}
+}
+
+func TestListStylesUseTerminalForeground(t *testing.T) {
+	if selectedBg != lipgloss.Color("#292a2e") {
+		t.Fatalf("selected background = %v, want #292a2e", selectedBg)
+	}
+	for _, focused := range []bool{false, true} {
+		d := newListDelegate(focused, 42).(list.DefaultDelegate)
+		for _, style := range []lipgloss.Style{d.Styles.NormalTitle, d.Styles.NormalDesc, d.Styles.SelectedTitle, d.Styles.SelectedDesc, d.Styles.DimmedTitle, d.Styles.DimmedDesc} {
+			if style.GetForeground() != (lipgloss.NoColor{}) {
+				t.Fatalf("list text foreground = %v, want terminal default", style.GetForeground())
+			}
+		}
+	}
+	l := newPanelList(newListDelegate(true, 42))
+	for _, style := range []lipgloss.Style{l.Styles.FilterPrompt, l.Styles.FilterCursor, l.Styles.NoItems, l.FilterInput.PromptStyle, l.FilterInput.Cursor.Style} {
+		if style.GetForeground() != (lipgloss.NoColor{}) {
+			t.Fatalf("list filter/empty text foreground = %v, want terminal default", style.GetForeground())
+		}
 	}
 }
 

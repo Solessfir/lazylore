@@ -7,9 +7,32 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"lazylore/internal/lore"
 )
+
+func TestDialogFocusDimsPaneAndRestoresItsHighlight(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
+	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = updated.(Model)
+	updated, _ = m.Update(statusMsg{status: lore.Status{Staged: []lore.FileChange{{Status: 'M', Path: "file.txt"}}}})
+	m = updated.(Model)
+	m.files.Select(1)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	m = updated.(Model)
+	if m.focus != focusFiles || m.prompt != promptCommit || !strings.Contains(m.View(), "\x1b[38;2;68;70;79mFiles\x1b[0m") {
+		t.Fatalf("dialog did not dim the remembered Files pane: %q", m.View())
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.focus != focusFiles || m.prompt != promptNone || m.files.Index() != 1 || !strings.Contains(m.View(), "\x1b[34mFiles\x1b[0m") {
+		t.Fatalf("closing dialog lost pane, selection, or focus highlight: %q", m.View())
+	}
+}
 
 func TestModel_ViewShowsContextualMainPanelTitle(t *testing.T) {
 	m := NewModel(&lore.FakeRunner{}, "test-repo", "/repo")

@@ -5,7 +5,20 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
+
+func TestColorizeDiff_MatchesGitRolesAndKeepsHunkContextDefault(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prev)
+
+	input := "diff --git a/a.txt b/a.txt\nindex 123..456\n--- a.txt\n+++ a.txt\n@@ -1 +1 @@ function name\n context\n-old\n+new"
+	want := "\x1b[1mdiff --git a/a.txt b/a.txt\x1b[0m\n\x1b[1mindex 123..456\x1b[0m\n\x1b[1m--- a.txt\x1b[0m\n\x1b[1m+++ a.txt\x1b[0m\n\x1b[36m@@ -1 +1 @@\x1b[0m function name\n context\n\x1b[31m-old\x1b[0m\n\x1b[32m+new\x1b[0m"
+	if got := colorizeDiff(input); got != want {
+		t.Fatalf("diff attributes = %q, want %q", got, want)
+	}
+}
 
 func TestColorizeDiff_PreservesLineContent(t *testing.T) {
 	input := "hello.txt\n--- hello.txt@1\n+++ hello.txt\n@@ -1 +1,2 @@\n Hello, Lore\n+Second line added\n"

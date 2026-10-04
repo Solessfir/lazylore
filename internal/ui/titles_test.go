@@ -8,6 +8,40 @@ import (
 	"github.com/muesli/termenv"
 )
 
+func TestPanelTabsStayBluePlainWhenUnfocused(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prev)
+
+	for _, focused := range []bool{false, true} {
+		for _, firstActive := range []bool{false, true} {
+			panel := renderDualTitledPanel(focused, 45, 1, "3", "Local branches", "Remotes", firstActive, "main")
+			top := strings.Split(panel, "\n")[0]
+			active := "Remotes"
+			if firstActive {
+				active = "Local branches"
+			}
+			if !strings.Contains(top, "\x1b[34m"+active+"\x1b[0m") || strings.Contains(top, "\x1b[1;") || strings.Contains(top, "\x1b[1m") {
+				t.Fatalf("focused=%v firstActive=%v: active tab lost blue plain style: %q", focused, firstActive, top)
+			}
+			if !focused && !strings.Contains(top, "\x1b[38;2;68;70;79m") {
+				t.Fatalf("unfocused frame lost #44464f: %q", top)
+			}
+			inactive := "Local branches"
+			if firstActive {
+				inactive = "Remotes"
+			}
+			wantInactive := inactive
+			if !focused {
+				wantInactive = "\x1b[38;2;68;70;79m" + inactive + "\x1b[0m"
+			}
+			if !strings.Contains(top, wantInactive) {
+				t.Fatalf("focused=%v: inactive tab lost its style: %q", focused, top)
+			}
+		}
+	}
+}
+
 func TestWithBottomCount_PreservesBorderColor(t *testing.T) {
 	// Force a real color profile - under `go test`'s non-tty default, color
 	// output is stripped entirely and a missing style would pass invisibly.

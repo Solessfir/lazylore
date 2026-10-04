@@ -9,20 +9,17 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Basic 16-color ANSI codes only (0-15) - the one palette every terminal
-// renders correctly, unlike 256-color/TrueColor codes which depend on
-// terminal capability detection going right.
 var (
 	focusedPanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("2")).
+				BorderForeground(borderFocused).
 				Padding(0)
 	unfocusedPanelStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("7")).
+				BorderForeground(borderUnfocused).
 				Padding(0)
 	errorStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-	keybindBarStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Height(1).Padding(0)
+	keybindBarStyle = lipgloss.NewStyle().Foreground(borderFocused).Height(1).Padding(0)
 )
 
 // bracketedKey wraps a named (non-printable) key in angle brackets:
@@ -112,7 +109,7 @@ func (m Model) footerText(width int, shortcuts string) string {
 	}
 	right := truncateKeybindBar(shortcuts, remaining)
 	if m.selectMode {
-		right = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(
+		right = lipgloss.NewStyle().Foreground(borderFocused).Render(
 			ansi.Truncate("Select mode - highlight text in your terminal, then press any key to restore mouse", max(0, remaining), "…"))
 	}
 	if right == "" {
@@ -270,7 +267,7 @@ func (m Model) View() string {
 	// Use titled-border rendering so "Status"/"Files" etc. appear in the top
 	// border line itself (╭─[N]─Title────╮), matching lazygit.
 	statusInnerH := max(0, statusPanelHeight-borderHeight)
-	statusPanel := renderTitledPanelForStatus(m.focus == focusStatus, m.panelWidth, statusInnerH, statusText)
+	statusPanel := renderTitledPanelForStatus(m.paneFocused(focusStatus), m.panelWidth, statusInnerH, statusText)
 
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		statusPanel,
@@ -284,16 +281,16 @@ func (m Model) View() string {
 				// renderListWindow doesn't account for it (see its doc comment).
 				v = strings.TrimLeft(m.files.View(), "\n\r")
 			default:
-				v = renderListWindow(m.files, fileDelegate{focused: m.focus == focusFiles}, effFilesH, m.filesScrollOverride)
+				v = renderListWindow(m.files, fileDelegate{focused: m.paneFocused(focusFiles)}, effFilesH, m.filesScrollOverride)
 			}
-			p := renderTitledPanel(m.focus == focusFiles, m.panelWidth, effFilesH, "2", "Files", v)
+			p := renderTitledPanel(m.paneFocused(focusFiles), m.panelWidth, effFilesH, "2", "Files", v)
 			if !m.files.SettingFilter() {
 				filesTotalItems := len(m.files.VisibleItems())
 				start := effectiveScrollStart(m.filesScrollOverride, m.files.Index(), filesTotalItems, effFilesH)
-				p = withScrollbar(p, start, filesTotalItems, effFilesH, m.focus == focusFiles)
+				p = withScrollbar(p, start, filesTotalItems, effFilesH, m.paneFocused(focusFiles))
 			}
 			if len(m.files.Items()) > 0 {
-				p = withBottomCount(p, listPositionCount(m.files), m.focus == focusFiles)
+				p = withBottomCount(p, listPositionCount(m.files), m.paneFocused(focusFiles))
 			}
 			return p
 		}(),
@@ -304,11 +301,11 @@ func (m Model) View() string {
 			case m.branches.SettingFilter():
 				v = strings.TrimLeft(m.branches.View(), "\n\r")
 			default:
-				v = renderListWindow(m.branches, compactTitleDelegate{focused: m.focus == focusBranches, width: m.panelWidth}, effBranchesH, m.branchesScrollOverride)
+				v = renderListWindow(m.branches, compactTitleDelegate{focused: m.paneFocused(focusBranches), width: m.panelWidth}, effBranchesH, m.branchesScrollOverride)
 			}
-			p := renderDualTitledPanel(m.focus == focusBranches, m.panelWidth, effBranchesH, "3", "Local branches", "Remotes", !m.showRemoteBranches, v)
+			p := renderDualTitledPanel(m.paneFocused(focusBranches), m.panelWidth, effBranchesH, "3", "Local branches", "Remotes", !m.showRemoteBranches, v)
 			if len(m.branches.Items()) > 0 {
-				p = withBottomCount(p, listPositionCount(m.branches), m.focus == focusBranches)
+				p = withBottomCount(p, listPositionCount(m.branches), m.paneFocused(focusBranches))
 			}
 			return p
 		}(),
@@ -319,11 +316,11 @@ func (m Model) View() string {
 			case m.history.SettingFilter():
 				v = strings.TrimLeft(m.history.View(), "\n\r")
 			default:
-				v = renderListWindow(m.history, compactTitleDelegate{focused: m.focus == focusHistory, width: m.panelWidth}, effHistoryH, m.historyScrollOverride)
+				v = renderListWindow(m.history, compactTitleDelegate{focused: m.paneFocused(focusHistory), width: m.panelWidth}, effHistoryH, m.historyScrollOverride)
 			}
-			p := renderTitledPanel(m.focus == focusHistory, m.panelWidth, effHistoryH, "4", "History", v)
+			p := renderTitledPanel(m.paneFocused(focusHistory), m.panelWidth, effHistoryH, "4", "History", v)
 			if len(m.history.Items()) > 0 {
-				p = withBottomCount(p, listPositionCount(m.history), m.focus == focusHistory)
+				p = withBottomCount(p, listPositionCount(m.history), m.paneFocused(focusHistory))
 			}
 			return p
 		}(),
@@ -352,13 +349,13 @@ func (m Model) View() string {
 		}
 		logContent = strings.Join(lines, "\n")
 	}
-	logPanel := renderTitledPanel(logCommandLogFocused, diffW, logInnerH, "6", "Command Log", logContent)
+	logPanel := renderTitledPanel(m.paneFocused(focusCommandLog), diffW, logInnerH, "6", "Command Log", logContent)
 
 	var right string
 	if logCommandLogFocused {
 		right = logPanel
 	} else {
-		diffPanel := renderTitledPanel(m.focus == focusDiff, diffW, effDiffH, "5", m.mainPanelTitle(), m.diff.viewWithScrollbar())
+		diffPanel := renderTitledPanel(m.paneFocused(focusDiff), diffW, effDiffH, "5", m.mainPanelTitle(), m.diff.viewWithScrollbar())
 		right = lipgloss.JoinVertical(lipgloss.Left, diffPanel, logPanel)
 	}
 	main := lipgloss.JoinHorizontal(lipgloss.Top, left, right)

@@ -74,6 +74,8 @@ Press `Enter` to apply a filter, including zero matches. `Esc` clears it.
 
 The bottom-left footer shows the current action or background load with animated dots every 180 ms. Overlapping activities stay tracked until each finishes; the newest appears first, then any earlier activity resumes. Shortcuts beside it appear only when the complete entry fits.
 
+The TUI inherits the terminal's default text and background, preserving transparency. Focused borders, hints, and active tabs use terminal blue; inactive borders use `#44464f`. Selected rows are bold, with a `#292a2e` background only in the focused pane. Semantic status and diff colors follow the terminal palette.
+
 When the terminal cannot fit the panels or an open prompt, resize it to continue. Prompts retain their text, and only `q` / `Ctrl+C` remain active while controls are hidden.
 
 Files panel:

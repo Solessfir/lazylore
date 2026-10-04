@@ -149,13 +149,26 @@ func (d fileDelegate) Height() int                         { return 1 }
 func (d fileDelegate) Spacing() int                        { return 0 }
 func (d fileDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
 
-// selectedRowStyle is the highlight overlay for the row under the cursor:
-// a background fill only, no Foreground override, so the row's own status
-// coloring shows through underneath it. Width must be set explicitly to
-// the list's own content width - without it the fill isn't bounded to this
-// panel and bleeds across the rest of the terminal row.
+// Cursor emphasis preserves semantic foreground colors. Only the focused
+// panel adds a background, bounded to the panel's content width.
+func cursorRowStyle(focused bool, width int) lipgloss.Style {
+	style := lipgloss.NewStyle().Bold(true).Width(width)
+	if focused {
+		style = style.Background(selectedBg)
+	}
+	return style
+}
+
 func selectedRowStyle(width int) lipgloss.Style {
-	return lipgloss.NewStyle().Background(selectedBg).Bold(true).Width(width)
+	return cursorRowStyle(true, width)
+}
+
+func renderStyledRow(style lipgloss.Style, display string) string {
+	// Lipgloss's automatic width padding carries background but drops bold.
+	if padding := style.GetWidth() - lipgloss.Width(display); padding > 0 {
+		display += style.UnsetWidth().UnsetMaxWidth().Render(strings.Repeat(" ", padding))
+	}
+	return style.Render(display)
 }
 
 func singleLineDisplay(text string) string {
@@ -174,7 +187,7 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	}
 	indent := strings.Repeat("  ", fi.depth)
 	label := singleLineDisplay(fi.label)
-	selected := d.focused && index == m.Index()
+	selected := index == m.Index()
 
 	if !selected {
 		// ANSI-aware clip to the panel's own content width - a deeply
@@ -204,51 +217,47 @@ func (d fileDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		return
 	}
 
-	// Selected row: we must include Background on the colored segments so the
-	// blue selection shows behind file names (and status letters). Plain
-	// concatenation of pre-styled segments + outer bg fails because inner
-	// .Render() calls emit resets that kill the background.
 	rowWidth := m.Width()
+	rowStyle := cursorRowStyle(d.focused, rowWidth)
+	if !d.focused {
+		rowStyle = rowStyle.UnsetWidth()
+	}
+	// Inner renders reset attributes, so each segment carries cursor styling.
+	segmentStyle := rowStyle.UnsetWidth()
 
 	if fi.isDir {
 		arrow := "▼"
 		if fi.collapsed {
 			arrow = "▶"
 		}
-		style := selectedRowStyle(rowWidth)
+		style := rowStyle
 		if fi.allStaged {
 			style = style.Foreground(fileStagedColor)
 		}
 		display := indent + arrow + " " + label
-		fmt.Fprint(w, style.Render(ansi.Truncate(display, rowWidth, "…")))
+		fmt.Fprint(w, renderStyledRow(style, ansi.Truncate(display, rowWidth, "…")))
 		return
 	}
 
 	// Selected file
 	statColor := fileStatusColor(fi.staged)
-	statStyle := lipgloss.NewStyle().
-		Foreground(statColor).
-		Background(selectedBg).
-		Bold(true)
+	statStyle := segmentStyle.Foreground(statColor)
 
-	nameStyle := fileNameStyle(fi.staged).
-		Background(selectedBg).
-		Bold(true)
+	nameStyle := segmentStyle.Inherit(fileNameStyle(fi.staged))
 
 	// The separator space must also carry the background, otherwise you get
 	// "A{no-bg space}Filename" under selection.
-	selSpace := lipgloss.NewStyle().Background(selectedBg).Bold(true)
+	selSpace := segmentStyle
 
 	colored := selSpace.Render(indent) +
 		statStyle.Render(string(fi.change.Status)) +
 		selSpace.Render(" ") +
 		nameStyle.Render(label)
 	if fi.locked {
-		colored += selSpace.Render(" ") + lockBadgeStyle(fi.lockedByMe).Background(selectedBg).Render(lockBadge)
+		colored += selSpace.Render(" ") + segmentStyle.Inherit(lockBadgeStyle(fi.lockedByMe)).Render(lockBadge)
 	}
 
-	// selectedRowStyle ensures full-width background fill (including gutter area)
-	fmt.Fprint(w, selectedRowStyle(rowWidth).Render(ansi.Truncate(colored, rowWidth, "…")))
+	fmt.Fprint(w, renderStyledRow(rowStyle, ansi.Truncate(colored, rowWidth, "…")))
 }
 
 // statusToItems flattens a Status's changed files into a directory tree
@@ -418,13 +427,21 @@ func (d compactTitleDelegate) Spacing() int                        { return 0 }
 func (d compactTitleDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
 
 func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
-	selected := d.focused && index == m.Index()
+	selected := index == m.Index()
 
 	// Breathing room inside the panel (1 col right gutter for text).
 	contentW := d.width
 	if contentW > 1 {
 		contentW--
 	}
+	rowStyle := lipgloss.NewStyle().Width(contentW).MaxWidth(contentW)
+	if selected {
+		rowStyle = cursorRowStyle(d.focused, contentW).MaxWidth(contentW)
+		if d.focused {
+			rowStyle = rowStyle.Width(d.width).MaxWidth(d.width)
+		}
+	}
+	segmentStyle := rowStyle.UnsetWidth().UnsetMaxWidth()
 
 	// Branch rows: current branch shows "* name" in green; others show a
 	// cyan recency prefix ("3d"). Title split (Local/Remotes) handled at
@@ -432,31 +449,18 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 	if bi, ok := listItem.(branchItem); ok {
 		name := singleLineDisplay(bi.branch.Name)
 
-		green := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
-		white := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
-		cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-		if selected {
-			green = green.Background(selectedBg).Bold(true)
-			white = white.Background(selectedBg)
-			cyan = cyan.Background(selectedBg)
-		}
+		green := segmentStyle.Foreground(lipgloss.Color("2")).Bold(true)
+		cyan := segmentStyle.Foreground(lipgloss.Color("6"))
 
 		var display string
 		if bi.branch.Current {
-			display = green.Render("* ") + white.Render(name)
+			display = green.Render("* ") + segmentStyle.Render(name)
 		} else {
 			rec := branchRecency(bi.branch)
-			display = cyan.Render(rec+" ") + white.Render(name)
+			display = cyan.Render(rec+" ") + segmentStyle.Render(name)
 		}
 
-		if selected {
-			// Full selection background (blue) across the row for the entire
-			// branch line, including the cyan recency part. Matches the
-			// fileDelegate pattern to ensure "full ... filled selection".
-			fmt.Fprint(w, selectedRowStyle(d.width).Render(ansi.Truncate(display, contentW, "…")))
-		} else {
-			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).Render(ansi.Truncate(display, contentW, "…")))
-		}
+		fmt.Fprint(w, renderStyledRow(rowStyle, ansi.Truncate(display, contentW, "…")))
 		return
 	}
 
@@ -484,31 +488,17 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 		if ri.unpushed {
 			hashColor = fileUnstagedColor // red
 		}
-		hashStyle := lipgloss.NewStyle().Foreground(hashColor)
-		purple := lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple-ish
-		msgStyle := lipgloss.NewStyle()
-		spaceStyle := lipgloss.NewStyle()
-		if selected {
-			hashStyle = hashStyle.Background(selectedBg).Bold(true)
-			purple = purple.Background(selectedBg)
-			msgStyle = msgStyle.Background(selectedBg)
-			spaceStyle = spaceStyle.Background(selectedBg)
-		}
+		hashStyle := segmentStyle.Foreground(hashColor)
+		purple := segmentStyle.Foreground(lipgloss.Color("5"))
 
-		// Build with explicit styles on all parts (including spaces and msg)
-		// so the blue selection background fills the entire row, matching
-		// the fix for Files and Branches.
+		// Spaces and messages need the same attributes as colored segments.
 		display := hashStyle.Render(hash) +
-			spaceStyle.Render(" ") +
+			segmentStyle.Render(" ") +
 			purple.Render(author+" ○") +
-			spaceStyle.Render(" ") +
-			msgStyle.Render(msg)
+			segmentStyle.Render(" ") +
+			segmentStyle.Render(msg)
 
-		if selected {
-			fmt.Fprint(w, selectedRowStyle(d.width).Render(ansi.Truncate(display, contentW, "…")))
-		} else {
-			fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).Render(ansi.Truncate(display, contentW, "…")))
-		}
+		fmt.Fprint(w, renderStyledRow(rowStyle, ansi.Truncate(display, contentW, "…")))
 		return
 	}
 
@@ -517,9 +507,5 @@ func (d compactTitleDelegate) Render(w io.Writer, m list.Model, index int, listI
 	if it, ok := listItem.(interface{ Title() string }); ok {
 		title = singleLineDisplay(it.Title())
 	}
-	if selected {
-		fmt.Fprint(w, selectedRowStyle(d.width).Render(ansi.Truncate(title, contentW, "…")))
-	} else {
-		fmt.Fprint(w, lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).Render(ansi.Truncate(title, contentW, "…")))
-	}
+	fmt.Fprint(w, renderStyledRow(rowStyle, ansi.Truncate(title, contentW, "…")))
 }

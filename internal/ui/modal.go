@@ -13,14 +13,13 @@ import (
 var (
 	modalBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("2")).
+			BorderForeground(borderFocused).
 			Padding(1, 2)
-	modalTitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
-	modalHintStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	modalTitleStyle = lipgloss.NewStyle().Foreground(borderFocused)
+	modalHintStyle  = lipgloss.NewStyle().Foreground(borderFocused)
 )
 
-// renderModal builds a centered popup box: a bold title line, a blank line,
-// the body, and (if given) a blank line followed by a dim hint line.
+// renderModal builds a centered popup with a title, body, and optional hints.
 func (m Model) renderModal(title, body, hint string) string {
 	width := 60
 	if m.width > 0 {
@@ -107,7 +106,7 @@ func (m Model) renderCommitModal() string {
 // file as a whole, so a single file is never "mixed" and the option stays
 // struck through for it.
 func (m Model) renderDiscardMenuModal() string {
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Strikethrough(true)
+	dim := lipgloss.NewStyle().Strikethrough(true)
 
 	body := "Discard all changes in " + m.pendingDiscardPath
 	unstagedLine := "u - Discard unstaged changes"
@@ -249,9 +248,9 @@ func selectableRank(rows []helpRow, cursor int) (rank, total int) {
 // scrollable list (see openHelp/helpCursor) inside a titled border box,
 // matching lazygit's own keybindings popup.
 func (m Model) renderHelpModal() string {
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true) // cyan
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))            // white
-	hdrStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true) // green
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	dimStyle := lipgloss.NewStyle()
+	hdrStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
 
 	// Right-align keys against a shared column so ragged key lengths (e.g.
 	// "y" vs "shift+tab / h") all end at the same point, with the section

@@ -110,14 +110,7 @@ type Model struct {
 	historyScrollOverride  int
 }
 
-// Selected-row colors: a background fill, not just a foreground change, so
-// the selected row is unmistakable regardless of terminal color profile.
-// Basic 16-color ANSI codes only (0-15) - the one palette every terminal
-// renders correctly.
-var (
-	selectedBg = lipgloss.Color("4")  // blue
-	selectedFg = lipgloss.Color("15") // bright white, for contrast against the blue fill
-)
+var selectedBg = lipgloss.Color("#292a2e")
 
 // newListDelegate returns a list.ItemDelegate for a list's selected row.
 // Only the panel that's actually focused gets the strong background fill;
@@ -131,19 +124,12 @@ var (
 // rebuild it (via syncFocusDelegates) whenever that width changes.
 func newListDelegate(focused bool, width int) list.ItemDelegate {
 	d := list.NewDefaultDelegate()
-	if focused {
-		d.Styles.SelectedTitle = d.Styles.SelectedTitle.
-			Background(selectedBg).
-			Foreground(selectedFg).
-			Bold(true).
-			Width(width)
-		d.Styles.SelectedDesc = d.Styles.SelectedDesc.
-			Background(selectedBg).
-			Foreground(selectedFg).
-			Width(width)
-	} else {
-		d.Styles.SelectedTitle = d.Styles.SelectedTitle.Bold(true)
-	}
+	d.Styles.NormalTitle = d.Styles.NormalTitle.UnsetForeground()
+	d.Styles.NormalDesc = d.Styles.NormalDesc.UnsetForeground()
+	d.Styles.DimmedTitle = d.Styles.DimmedTitle.UnsetForeground()
+	d.Styles.DimmedDesc = d.Styles.DimmedDesc.UnsetForeground()
+	d.Styles.SelectedTitle = d.Styles.NormalTitle.Inherit(cursorRowStyle(focused, width))
+	d.Styles.SelectedDesc = d.Styles.NormalDesc.Inherit(cursorRowStyle(focused, width))
 	return d
 }
 
@@ -160,17 +146,23 @@ func newPanelList(delegate list.ItemDelegate) list.Model {
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
 	l.SetShowPagination(false)
+	l.Styles.FilterPrompt = l.Styles.FilterPrompt.UnsetForeground()
+	l.Styles.FilterCursor = l.Styles.FilterCursor.UnsetForeground()
+	l.Styles.NoItems = l.Styles.NoItems.UnsetForeground()
+	l.FilterInput.PromptStyle = l.Styles.FilterPrompt
+	l.FilterInput.Cursor.Style = l.Styles.FilterCursor
 	return l
 }
 
-// syncFocusDelegates re-applies the focused/unfocused delegate to each of
-// the Files/Branches/History lists to match m.focus, called whenever focus
-// changes. list.Model has no "am I focused" concept of its own, so the
-// delegate has to be pushed in from outside.
+func (m Model) paneFocused(panel focusPanel) bool {
+	return m.focus == panel && m.prompt == promptNone && !m.showHelp
+}
+
+// Lists retain their cursor while dialogs temporarily take focus.
 func (m *Model) syncFocusDelegates() {
-	m.files.SetDelegate(fileDelegate{focused: m.focus == focusFiles})
-	m.branches.SetDelegate(compactTitleDelegate{focused: m.focus == focusBranches, width: m.panelWidth})
-	m.history.SetDelegate(compactTitleDelegate{focused: m.focus == focusHistory, width: m.panelWidth})
+	m.files.SetDelegate(fileDelegate{focused: m.paneFocused(focusFiles)})
+	m.branches.SetDelegate(compactTitleDelegate{focused: m.paneFocused(focusBranches), width: m.panelWidth})
+	m.history.SetDelegate(compactTitleDelegate{focused: m.paneFocused(focusHistory), width: m.panelWidth})
 
 	// Re-assert no chrome so "X of Y" count text never appears in bottom right of panels
 	m.files.SetShowStatusBar(false)
@@ -1161,6 +1153,7 @@ func (m Model) Update(msg tea.Msg) (updated tea.Model, cmd tea.Cmd) {
 	defer func() {
 		if next, ok := updated.(Model); ok {
 			next.syncPanelSizes()
+			next.syncFocusDelegates()
 			if tick := next.activityTickCmd(); tick != nil {
 				cmd = tea.Batch(cmd, tick)
 			}

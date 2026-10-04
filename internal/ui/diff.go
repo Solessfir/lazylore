@@ -12,7 +12,7 @@ import (
 var (
 	diffAddStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	diffDelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	diffHunkStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	diffHunkStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 	diffHeaderStyle = lipgloss.NewStyle().Bold(true)
 )
 
@@ -107,14 +107,19 @@ func colorizeDiff(text string) string {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		switch {
-		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
+		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---") || strings.HasPrefix(line, "diff ") || strings.HasPrefix(line, "index "):
 			lines[i] = diffHeaderStyle.Render(line)
 		case strings.HasPrefix(line, "+"):
 			lines[i] = diffAddStyle.Render(line)
 		case strings.HasPrefix(line, "-"):
 			lines[i] = diffDelStyle.Render(line)
 		case strings.HasPrefix(line, "@@"):
-			lines[i] = diffHunkStyle.Render(line)
+			if end := strings.Index(line[2:], "@@"); end >= 0 {
+				end += 4
+				lines[i] = diffHunkStyle.Render(line[:end]) + line[end:]
+			} else {
+				lines[i] = diffHunkStyle.Render(line)
+			}
 		}
 	}
 	return strings.Join(lines, "\n")

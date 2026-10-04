@@ -18,8 +18,8 @@ import (
 // colors come from the focused/unfocused panel styles; the injected top
 // line is recolored to keep the "frame" appearance consistent.
 var (
-	borderFocused   = lipgloss.Color("2") // green for focused
-	borderUnfocused = lipgloss.Color("7") // white for inactive borders
+	borderFocused   = lipgloss.Color("4")
+	borderUnfocused = lipgloss.Color("#44464f")
 )
 
 // injectTitle replaces the top border of a rendered rounded box with a
@@ -37,23 +37,13 @@ func injectTitle(rendered, num, name string, paneWidth int, focused bool) string
 		paneWidth = measuredW
 	}
 
-	// Frame (corners, dashes, [N]) uses the border color (green when panel focused)
+	// Frame corners, dashes, and jump numbers share the panel's border color.
 	frameCol := borderUnfocused
 	if focused {
 		frameCol = borderFocused
 	}
 	frameStyle := lipgloss.NewStyle().Foreground(frameCol)
-	if focused {
-		frameStyle = frameStyle.Bold(true)
-	}
-
-	// Title name for single titles (Status, Files, History, Diff, etc.) is white.
-	// Green is reserved exclusively to indicate the *selected tab* in dual/split titles
-	// (e.g. the active one between "Local branches" and "Remotes").
-	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
-	if focused {
-		nameStyle = nameStyle.Bold(true)
-	}
+	nameStyle := frameStyle
 
 	// Build the left frame part (includes left border char)
 	namePrefix := "─"
@@ -70,8 +60,7 @@ func injectTitle(rendered, num, name string, paneWidth int, focused bool) string
 }
 
 // injectDualTitle renders a split tab-like title for the Branches panel
-// matching lazygit: ╭─[3]─{green}Local branches{green} - {white}Remotes{white}──╮
-// Active tab name is green, inactive white. Separator " - " per user spec.
+// Active tabs stay blue regardless of pane focus.
 func injectDualTitle(rendered, num, firstName, secondName string, firstActive bool, paneWidth int, focused bool) string {
 	lines := strings.Split(rendered, "\n")
 	if len(lines) == 0 {
@@ -88,12 +77,11 @@ func injectDualTitle(rendered, num, firstName, secondName string, firstActive bo
 		borderCol = borderFocused
 	}
 	borderStyle := lipgloss.NewStyle().Foreground(borderCol)
+	activeStyle := lipgloss.NewStyle().Foreground(borderFocused)
+	inactiveStyle := borderStyle
 	if focused {
-		borderStyle = borderStyle.Bold(true)
+		inactiveStyle = lipgloss.NewStyle()
 	}
-
-	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))   // green for active tab name
-	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7")) // white
 
 	prefix := "─[" + num + "]─ "
 	separator := " - "
@@ -104,7 +92,7 @@ func injectDualTitle(rendered, num, firstName, secondName string, firstActive bo
 
 	innerW := max(0, paneWidth-2)
 	label := ansi.Truncate(borderStyle.Render(prefix)+firstStyle.Render(firstName)+
-		borderStyle.Render(separator)+secondStyle.Render(secondName), innerW, "")
+		inactiveStyle.Render(separator)+secondStyle.Render(secondName), innerW, "")
 	top := borderStyle.Render("╭") + label +
 		borderStyle.Render(strings.Repeat("─", innerW-lipgloss.Width(label))+"╮")
 
@@ -144,7 +132,7 @@ func renderTitledPanel(focused bool, width, height int, num, title, content stri
 
 // renderDualTitledPanel is like renderTitledPanel but uses a split tab title
 // (e.g. for Branches: Local branches - Remotes). firstActive controls which
-// name gets the green color.
+// name gets the blue color.
 func renderDualTitledPanel(focused bool, width, height int, num, firstName, secondName string, firstActive bool, content string) string {
 	s := unfocusedPanelStyle
 	if focused {
@@ -194,9 +182,6 @@ func withBottomCount(rendered, count string, focused bool) string {
 		frameCol = borderFocused
 	}
 	frameStyle := lipgloss.NewStyle().Foreground(frameCol)
-	if focused {
-		frameStyle = frameStyle.Bold(true)
-	}
 
 	count = ansi.Truncate(count, max(0, w-4), "…")
 	countW := lipgloss.Width(count)
@@ -250,9 +235,6 @@ func withTopRightCount(rendered, count string, focused bool) string {
 		frameCol = borderFocused
 	}
 	frameStyle := lipgloss.NewStyle().Foreground(frameCol)
-	if focused {
-		frameStyle = frameStyle.Bold(true)
-	}
 
 	trimmed := lipgloss.NewStyle().MaxWidth(w - countW - 1).Render(top)
 	lines[0] = trimmed + frameStyle.Render(countStr) + frameStyle.Render("╮")
@@ -291,9 +273,6 @@ func withScrollbar(rendered string, start, total, height int, focused bool) stri
 		frameCol = borderFocused
 	}
 	frameStyle := lipgloss.NewStyle().Foreground(frameCol)
-	if focused {
-		frameStyle = frameStyle.Bold(true)
-	}
 
 	// lines[0] is the top border, lines[len-1] the bottom border - content
 	// rows are everything between, one row per index into [0, height).
