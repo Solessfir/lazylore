@@ -16,6 +16,12 @@ Download the archive for your OS and architecture from the
 [Releases page](https://github.com/Solessfir/lazylore/releases), extract
 `lazylore` (`lazylore.exe` on Windows), and place it on your `PATH`.
 
+On Windows, once the package is available in WinGet:
+
+```powershell
+winget install --exact --id Solessfir.lazylore
+```
+
 Or install with Go:
 
 ```bash

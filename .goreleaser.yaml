@@ -41,3 +41,26 @@ release:
   github:
     owner: Solessfir
     name: lazylore
+
+winget:
+  - name: lazylore
+    package_identifier: Solessfir.lazylore
+    publisher: Solessfir
+    short_description: A terminal UI for Lore.
+    license: MIT
+    homepage: https://github.com/Solessfir/lazylore
+    license_url: "https://github.com/Solessfir/lazylore/blob/{{ .Tag }}/LICENSE"
+    publisher_support_url: https://github.com/Solessfir/lazylore/issues
+    skip_upload: auto
+    commit_msg_template: "Update {{ .PackageIdentifier }} to {{ .Version }}"
+    repository:
+      owner: Solessfir
+      name: winget-pkgs
+      branch: "lazylore-{{ .Version }}"
+      token: "{{ .Env.WINGET_TOKEN }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
