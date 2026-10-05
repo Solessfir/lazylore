@@ -12,15 +12,19 @@ A terminal UI for [Lore](https://github.com/EpicGames/lore), Epic Games' open so
 
 ## Installation
 
-Download the archive for your OS and architecture from the
-[Releases page](https://github.com/Solessfir/lazylore/releases), extract
-`lazylore` (`lazylore.exe` on Windows), and place it on your `PATH`.
-
 On Windows, once the package is available in WinGet:
 
 ```powershell
 winget install --exact --id Solessfir.lazylore
 ```
+
+On Linux, install the latest release with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Solessfir/lazylore/main/install.sh | sh
+```
+
+To choose another directory, run the downloaded script as `sh install.sh /your/bin`.
 
 Or install with Go:
 
@@ -30,6 +34,10 @@ go install github.com/solessfir/lazylore/cmd/lazylore@latest
 
 Go places the executable in `GOBIN`, or `GOPATH/bin` when `GOBIN` is unset.
 Add that directory to your `PATH`.
+
+Download the archive for your OS and architecture from the
+[Releases page](https://github.com/Solessfir/lazylore/releases), extract
+`lazylore` (`lazylore.exe` on Windows), and place it on your `PATH`.
 
 Or build from source:
 
