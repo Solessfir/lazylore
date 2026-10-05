@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 func TestFindRepoRoot_FindsFromDeepSubdir(t *testing.T) {

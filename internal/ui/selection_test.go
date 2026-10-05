@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/cursor"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 func TestModel_PublicationsClampShrinkingSelectionAndPreserveValidIndex(t *testing.T) {

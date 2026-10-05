@@ -12,7 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 // jsonCompleteSuccess is the minimal real shape of a --json command's

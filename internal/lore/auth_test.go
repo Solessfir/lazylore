@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 func TestCurrentUserID_ParsesAuthUserInfoEvent(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 func TestNativeWorkflow(t *testing.T) {

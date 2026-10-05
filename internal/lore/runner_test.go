@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 func TestExecRunner_Run_CapturesStdoutAndExitCode(t *testing.T) {

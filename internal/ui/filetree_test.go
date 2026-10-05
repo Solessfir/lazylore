@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 func TestBuildFileTree_EmptyStatusHasNoRows(t *testing.T) {

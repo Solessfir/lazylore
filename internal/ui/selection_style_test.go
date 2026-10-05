@@ -15,7 +15,7 @@ import (
 	"github.com/charmbracelet/x/cellbuf"
 	"github.com/muesli/termenv"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 func TestCursorRowsPreserveAttributesAcrossColoredSegments(t *testing.T) {

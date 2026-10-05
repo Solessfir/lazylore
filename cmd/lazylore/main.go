@@ -11,9 +11,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lazylore/internal/config"
-	"lazylore/internal/lore"
-	"lazylore/internal/ui"
+	"github.com/solessfir/lazylore/internal/config"
+	"github.com/solessfir/lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/ui"
 )
 
 func main() {

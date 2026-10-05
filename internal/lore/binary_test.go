@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 func notFoundLookPath(string) (string, error) {

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 func TestParseHistory_DecodesEscapedAuthors(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 // Captured verbatim from `lore.exe --json status` against a real repo with

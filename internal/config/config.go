@@ -14,11 +14,15 @@ type Config struct {
 	LorePath string `yaml:"lorePath"`
 }
 
-// Load reads config.yml from dir. A missing file is not an error - it
-// returns the zero Config, matching "use the defaults" semantics.
+// Load reads config.yaml, falling back to config.yml for existing installations.
+// Missing configuration uses the defaults.
 func Load(dir string) (Config, error) {
-	path := filepath.Join(dir, "config.yml")
+	path := filepath.Join(dir, "config.yaml")
 	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		path = filepath.Join(dir, "config.yml")
+		data, err = os.ReadFile(path)
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		return Config{}, nil
 	}

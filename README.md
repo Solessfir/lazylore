@@ -1,22 +1,29 @@
 # lazylore
 
-A terminal UI for [Lore](https://github.com/EpicGames/lore), Epic Games' open
-source version control system - the same relationship
-[lazygit](https://github.com/jesseduffield/lazygit) has to `git`.
+A terminal UI for [Lore](https://github.com/EpicGames/lore), Epic Games' open source version control system, inspired by [lazygit](https://github.com/jesseduffield/lazygit).
 
 ![Screenshot](.github/Screenshot.png)
 
 ## Requirements
 
 - A Lore installation discoverable automatically or configured through
-  `lorePath` in `config.yml`, see below.
-- Go 1.24.2 or newer when building from source.
+  `lorePath` in `config.yaml`, see below.
+- Go 1.24.2 or newer when installing with Go or building from source.
 
-## Install
+## Installation
 
 Download the archive for your OS and architecture from the
 [Releases page](https://github.com/Solessfir/lazylore/releases), extract
 `lazylore` (`lazylore.exe` on Windows), and place it on your `PATH`.
+
+Or install with Go:
+
+```bash
+go install github.com/solessfir/lazylore/cmd/lazylore@latest
+```
+
+Go places the executable in `GOBIN`, or `GOPATH/bin` when `GOBIN` is unset.
+Add that directory to your `PATH`.
 
 Or build from source:
 
@@ -37,9 +44,13 @@ the platform's default install location (`C:\Program Files\lore\lore.exe`
 on Windows; `/usr/local/bin/lore`, then `/opt/lore/bin/lore`, on Linux and
 macOS). Most installs need no configuration at all.
 
-If `lore` lives somewhere else, override it via `config.yml` in `lazylore`'s
-OS config directory (`%AppData%\lazylore` on Windows, `~/.config/lazylore`
-on Linux, `~/Library/Application Support/lazylore` on macOS):
+If `lore` lives somewhere else, set `lorePath` in `config.yaml`:
+
+| Platform | Path |
+|---|---|
+| Linux | `~/.config/lazylore/config.yaml` |
+| macOS | `~/Library/Application Support/lazylore/config.yaml` |
+| Windows | `%AppData%\lazylore\config.yaml` |
 
 ```yaml
 lorePath: C:\custom\path\to\lore.exe
@@ -47,6 +58,7 @@ lorePath: C:\custom\path\to\lore.exe
 
 Relative binary paths resolve from the directory where `lazylore` is launched.
 On Linux, `$XDG_CONFIG_HOME/lazylore` overrides the default config directory.
+Existing `config.yml` files remain supported when `config.yaml` is absent.
 
 Lore handles repository and server configuration. For servers requiring
 authentication, sign in with the Lore CLI before launching; `lazylore` uses
@@ -58,84 +70,61 @@ Notepad; Linux and macOS use the first installed editor from `vi`, `vim`,
 
 ## Keybindings
 
-Global (during normal pane navigation):
+Press `?` for context-sensitive help. Type to search descriptions, or start with `@` to search keys. Arrow keys select a binding and `Enter` executes it. `Esc` clears the search first, then closes help.
+
+### Global
 
 | Key | Action |
 |---|---|
-| `Tab` / `Shift+Tab` or `l` / `h` | cycle focused panel |
-| `1`-`6` | jump directly to Status, Files, Branches, History, Diff, or Command Log |
-| `[` / `]` | cycle Branches sub-tab (Local / Remotes) |
-| `p` / `P` | pull / push the current branch |
-| `/` | filter the focused list |
-| `v` | select mode (release mouse capture to copy text with your terminal; any key restores capture) |
-| Mouse click | focus a panel / select a row |
-| Mouse wheel | scroll the list or diff under the cursor, without changing focus or selection |
-| `?` | full keybindings help |
-| `q` / `Ctrl+C` | quit |
+| `Tab` / `Shift+Tab` or `l` / `h` | Cycle focused pane |
+| `1`-`6` | Jump to Status, Files, Branches, History, Diff, or Command Log |
+| `[` / `]` | Cycle Branches sub-tab (Local / Remotes) |
+| `p` / `P` | Pull / push the current branch |
+| `/` | Filter the focused list |
+| `v` | Select mode (release mouse capture to copy text; any key restores capture) |
+| Mouse click | Focus a pane / select a row |
+| Mouse wheel | Scroll the list or diff under the cursor |
+| `?` | Keybindings help |
+| `q` / `Ctrl+C` | Quit |
 
-Press `Enter` to apply a filter, including zero matches. `Esc` clears it.
+Press `Enter` to apply a list filter and `Esc` to clear it. In confirmation dialogs, `Enter` or `y` confirms; `Esc` or `n` cancels.
 
-Popups use compact titled borders and contextual footer shortcuts. `Enter`
-confirms and `Esc` cancels; confirmation dialogs also accept `y` and `n`.
-In keybindings help, type to search descriptions with fuzzy matching. Prefix the
-query with `@` to search key names, such as `@space` or `@shift+tab`. `/` also opens
-the filter. Arrow keys navigate results; `j` and `k` navigate
-before searching. `Esc` clears the search, then closes the help. `Enter` executes
-the selected binding through its usual confirmation and guards. Resizing preserves
-the selected help row and input text.
-
-Scrollable panes draw their scrollbar on the border. Below 40 terminal rows,
-the command log shrinks to one content row, leaving more room for the main pane.
-Focus the command log with `6` to expand it.
-
-The bottom-left footer shows the current action or background load with animated dots every 180 ms. Overlapping activities stay tracked until each finishes; the newest appears first, then any earlier activity resumes. Shortcuts beside it appear only when the complete entry fits.
-
-The TUI inherits the terminal's default text and background, preserving transparency. Focused borders, hints, and active tabs use terminal blue; inactive borders use `#44464f`. Selected rows are bold, with a `#292a2e` background only in the focused pane. Semantic status and diff colors follow the terminal palette.
-
-When the terminal cannot fit the panels or an open prompt, resize it to continue. Prompts retain their text, and only `q` / `Ctrl+C` remain active while controls are hidden.
-
-Files panel:
+### Files pane
 
 | Key | Action |
 |---|---|
-| `↑↓` / `j` `k` | move selection |
-| `Space` | stage / unstage the selected file, or a whole folder recursively |
-| `a` | stage / unstage everything |
-| `Enter` | expand/collapse a folder, or view the selected file's diff |
-| `c` | commit staged changes; if none are staged, confirm staging all changes first |
-| `e` | edit the file in `$VISUAL`/`$EDITOR` |
-| `d` | discard menu (`x` discard all, `u` discard unstaged - folders with a mix of staged/unstaged files only) |
-| `D` | confirm discarding changes in the files listed when the prompt opens |
-| `L` | lock / unlock a file; another owner's lock requires force-unlock confirmation |
+| `↑↓` / `j` / `k` | Move selection |
+| `Space` | Stage / unstage the selected file, or a whole folder recursively |
+| `a` | Stage / unstage everything |
+| `Enter` | Expand/collapse a folder, or view the selected file's diff |
+| `c` | Commit staged changes; if none are staged, confirm staging all changes first |
+| `e` | Edit the file in `$VISUAL`/`$EDITOR` |
+| `d` | Discard menu (`x` discard all, `u` discard unstaged - folders with a mix of staged/unstaged files only) |
+| `D` | Confirm discarding changes in the files listed when the prompt opens |
+| `L` | Lock / unlock a file; another owner's lock requires force-unlock confirmation |
 
-The discard menu supports Up/Down or `k`/`j`, Enter/Space to execute the selected
-option, and Esc to cancel. Its description follows the selection and explains
-disabled options. The `x` and `u` shortcuts execute their options directly.
+Use arrow keys or `j` / `k` in the discard menu, `Enter` / `Space` to execute, and `Esc` to cancel. The `x` and `u` shortcuts execute their options directly.
 
-Folder discard captures its file list when the menu opens, preserving later
-changes in other files. Discarding unstaged changes also preserves files that
-become staged while the menu is open.
-If a listed file becomes a directory, discard stops so its new contents stay intact.
+Folder discard affects the files listed when confirmation opens. Discarding unstaged changes preserves files staged afterward.
 
-Branches panel:
+### Branches pane
 
 | Key | Action |
 |---|---|
-| `Space` | checkout the selected branch |
-| `n` | create a new branch (opens a name prompt) |
-| `g` | reset the current branch to the selected branch |
-| `M` | merge the selected branch into the current branch |
+| `Space` | Checkout the selected branch |
+| `n` | Create a new branch |
+| `g` | Reset the current branch to the selected branch |
+| `M` | Merge the selected branch into the current branch |
 
-Reset (`g`) moves the current branch's latest revision pointer; it does not
-reset working files.
+Reset (`g`) changes the branch's latest revision without changing working files.
 
-History panel:
+### History pane
 
 | Key | Action |
 |---|---|
-| `Space` | checkout the selected revision |
-| `d` | revert the selected revision by creating a new revision |
-| `g` | reset the current branch to the selected revision |
+| `Space` | Checkout the selected revision |
+| `d` | Revert the selected revision by creating a new revision |
+| `g` | Reset the current branch to the selected revision |
 
 Clean merges and reverts commit automatically. Use the Lore CLI to resolve
 or abort conflicts; the TUI reports them as errors.
@@ -143,10 +132,8 @@ or abort conflicts; the TUI reports them as errors.
 ## Development
 
 ```bash
-go build -o bin/lazylore ./cmd/lazylore       # build
-go test ./...                                 # run the test suite
-go vet ./...                                  # static checks
-gofmt -l .                                    # list any unformatted files (gofmt -w . to fix)
+go test ./...
+go vet ./...
 ```
 
 To exercise the real CLI and a disposable local server, set absolute paths
@@ -158,22 +145,6 @@ LORE_TEST_BINARY=/path/to/lore LORE_TEST_SERVER=/path/to/loreserver go test ./in
 
 The native test creates its own repository, server storage, and configuration,
 and removes them afterward. It is skipped when the binary paths are unset.
-
-## Releases
-
-Pushing a version tag beginning with `v` runs the release workflow. It runs
-tests and vet, then builds Linux, Windows, and macOS binaries for amd64 and
-arm64 and uploads the archives and `checksums.txt` to a GitHub release.
-
-After pushing the changes to GitHub:
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-Use a new semantic version for each release. GitHub's built-in `GITHUB_TOKEN`
-handles publishing; no additional secret is required.
 
 ## License
 

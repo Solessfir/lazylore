@@ -19,7 +19,7 @@ func ResolveBinaryPath(override string, lookPath func(string) (string, error), e
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("lore binary not found on PATH or in the default install location, and no override is configured (set lorePath in config.yml)")
+	return "", fmt.Errorf("lore binary not found on PATH or in the default install location, and no override is configured (set lorePath in config.yaml)")
 }
 
 // defaultInstallPaths returns the platform's conventional lore install

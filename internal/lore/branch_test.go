@@ -3,7 +3,7 @@ package lore_test
 import (
 	"testing"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 // Captured verbatim from `lore.exe --json branch list` on a fresh repo

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 // jsonCompleteSuccess/jsonCompleteFailure are the minimal real shape of a

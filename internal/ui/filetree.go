@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 // fileTreeNode is one node in the directory tree built from a lore.Status's

@@ -1,4 +1,4 @@
-module lazylore
+module github.com/solessfir/lazylore
 
 go 1.24.2
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"lazylore/internal/lore"
+	"github.com/solessfir/lazylore/internal/lore"
 )
 
 func TestLockStatus_ParsesLockedPaths(t *testing.T) {
