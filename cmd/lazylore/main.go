@@ -44,8 +44,12 @@ func run() error {
 	}
 	repoRoot, err := lore.FindRepoRoot(cwd)
 	if err != nil {
-		if cloneErr := promptCloneHere(binPath, cwd); cloneErr != nil {
+		cloned, cloneErr := promptCloneHere(binPath, cwd)
+		if cloneErr != nil {
 			return cloneErr
+		}
+		if !cloned {
+			return nil
 		}
 		repoRoot, err = lore.FindRepoRoot(cwd)
 		if err != nil {
@@ -66,15 +70,15 @@ func run() error {
 // working directory isn't a lore repository - lazygit's own "not a git
 // repository, create one?" prompt, except lore repos are server-registered
 // (see lore repository create), so cloning an existing one is the closer
-// equivalent to a bare local init. Leaving the prompt empty, or a clone
-// that fails (bad URL, no auth, ...), returns an error and lazylore exits
-// without ever starting the TUI.
-func promptCloneHere(binPath, dir string) error {
+// equivalent to a bare local init. Leaving the prompt empty (or EOF on stdin)
+// reports false so lazylore exits cleanly; a clone that fails (bad URL, no
+// auth, ...) returns an error. Neither case starts the TUI.
+func promptCloneHere(binPath, dir string) (bool, error) {
 	fmt.Fprint(os.Stderr, "Not a lore repository. Please provide repository URL or Enter to exit: ")
 	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	url := strings.TrimSpace(line)
 	if url == "" {
-		return fmt.Errorf("no repository URL given")
+		return false, nil
 	}
 
 	cmd := exec.Command(binPath, "clone", url, dir)
@@ -82,9 +86,9 @@ func promptCloneHere(binPath, dir string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("cloning %q: %w", url, err)
+		return false, fmt.Errorf("cloning %q: %w", url, err)
 	}
-	return nil
+	return true, nil
 }
 
 func fileExists(path string) bool {

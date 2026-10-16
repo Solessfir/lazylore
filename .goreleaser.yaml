@@ -51,6 +51,8 @@ winget:
     homepage: https://github.com/Solessfir/lazylore
     license_url: "https://github.com/Solessfir/lazylore/blob/{{ .Tag }}/LICENSE"
     publisher_support_url: https://github.com/Solessfir/lazylore/issues
+    dependencies:
+      - package_identifier: EpicGames.Lore
     skip_upload: auto
     commit_msg_template: "Update {{ .PackageIdentifier }} to {{ .Version }}"
     repository:
